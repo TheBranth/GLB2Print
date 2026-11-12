@@ -61,55 +61,48 @@ def get_system_specs():
 
 def classify_system(ram_gb: float, cores: int) -> dict:
     """
-    Classifies system performance tier and provides educated processing estimates:
-    - monster: >= 31GB RAM & >= 12 cores (High-end workstations)
-    - standard: >= 15GB RAM & >= 6 cores (Capable desktop/laptop)
-    - mid_low: >= 7.5GB RAM (Budget PCs)
-    - chromebook: < 7.5GB RAM or <= 2 cores (Chromebooks, low-power netbooks)
+    Classifies system performance tier and provides clean hardware estimates:
+    - fast: >= 31GB RAM or >= 12 cores (High-end workstations)
+    - good: >= 15GB RAM or >= 6 cores (Good desktop/laptop)
+    - decent: >= 7.5GB RAM (Decent standard PC)
+    - very_slow: < 7.5GB RAM or <= 2 cores (Chromebooks, low-power netbooks)
     """
-    if ram_gb >= 31.0 and cores >= 12:
+    specs_str = f"{ram_gb:.0f} GB RAM · {cores} Cores" if ram_gb >= 10 else f"{ram_gb:.1f} GB RAM · {cores} Cores"
+    if ram_gb >= 31.0 or cores >= 12:
         return {
-            "tier": "monster",
-            "tier_label": "⚡ Workstation Beast",
-            "specs_label": f"{ram_gb:.0f}GB RAM · {cores} Cores",
+            "tier": "fast",
+            "tier_label": "Fast machine",
+            "specs_label": specs_str,
             "color": "#4ade80",
-            "estimate_speed": "ultra_fast",
-            "watchdog_seconds": 900,
-            "banner_type": "success",
-            "banner_msg": "Workstation beast detected. High-poly models (~1.5M+ faces) will process in ~10–25s."
+            "estimate_short": "Expect ~15–30 seconds",
+            "watchdog_seconds": 900
         }
-    elif ram_gb >= 15.0 and cores >= 6:
+    elif ram_gb >= 15.0 or cores >= 6:
         return {
-            "tier": "standard",
-            "tier_label": "💻 Standard PC",
-            "specs_label": f"{ram_gb:.0f}GB RAM · {cores} Cores",
+            "tier": "good",
+            "tier_label": "Good machine",
+            "specs_label": specs_str,
             "color": "#38bdf8",
-            "estimate_speed": "moderate",
-            "watchdog_seconds": 900,
-            "banner_type": "info",
-            "banner_msg": "Solid system detected. Processing high-poly models typically takes ~30–75s."
+            "estimate_short": "Expect ~30–60 seconds",
+            "watchdog_seconds": 900
         }
     elif ram_gb >= 7.5:
         return {
-            "tier": "mid_low",
-            "tier_label": "🐌 Budget PC",
-            "specs_label": f"{ram_gb:.1f}GB RAM · {cores} Cores",
+            "tier": "decent",
+            "tier_label": "Decent machine",
+            "specs_label": specs_str,
             "color": "#fbbf24",
-            "estimate_speed": "slow",
-            "watchdog_seconds": 1200,
-            "banner_type": "warning",
-            "banner_msg": "Moderate hardware. Heavy models (1M+ faces) may take 2–5 minutes. Decimation is recommended!"
+            "estimate_short": "Expect ~90s – 2 min. Decimation recommended",
+            "watchdog_seconds": 1200
         }
     else:
         return {
-            "tier": "chromebook",
-            "tier_label": "⚠️ Low-Power / Chromebook",
-            "specs_label": f"{ram_gb:.1f}GB RAM · {cores} Cores",
+            "tier": "very_slow",
+            "tier_label": "Very slow machine",
+            "specs_label": specs_str,
             "color": "#f87171",
-            "estimate_speed": "very_slow",
-            "watchdog_seconds": 1800,
-            "banner_type": "danger",
-            "banner_msg": "⚠️ Low-spec device detected! Processing 1M+ face models will take a LOOOONG time (5–15+ minutes). Please enable Decimation!"
+            "estimate_short": "Expect ~15+ min. Decimation strongly recommended. Get a coffee ☕",
+            "watchdog_seconds": 1800
         }
 
 class UnifiedAppServer:

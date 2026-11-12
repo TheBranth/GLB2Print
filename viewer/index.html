@@ -453,11 +453,13 @@
             <span class="model-label">Geometry:</span>
             <span class="model-val" id="model-poly-count">-</span>
           </div>
-          <div class="model-info-row" style="margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(255,255,255,0.08);">
-            <span class="model-label">Hardware:</span>
-            <span class="model-val" id="sys-tier-badge" style="font-size: 0.73rem; font-weight: 600;">Detecting...</span>
+          <div class="model-info-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06); align-items: flex-start;">
+            <span class="model-label" style="margin-top: 1px;">Hardware:</span>
+            <div style="text-align: right; margin-left: auto;">
+              <span class="model-val" id="sys-tier-badge" style="font-size: 0.74rem; font-weight: 600; cursor: help;" title="Checking system specs...">Detecting...</span>
+              <div id="sys-estimate-text" style="font-size: 0.68rem; color: #9ca3af; margin-top: 2px;"></div>
+            </div>
           </div>
-          <div id="sys-estimate-banner" style="display: none; margin-top: 7px; font-size: 0.72rem; border-radius: 6px; padding: 6px 9px; line-height: 1.35;"></div>
           <div class="file-actions">
             <button class="btn-file" onclick="triggerOpenFileDialog()">📁 Open Model</button>
             <input type="file" id="file-picker" accept=".glb,.gltf" style="display:none;" onchange="onFilePicked(event)">
@@ -751,11 +753,6 @@
         .then(r => r.json())
         .then(specs => {
           systemSpecs = specs;
-          const badge = document.getElementById('sys-tier-badge');
-          if (badge) {
-            badge.innerText = `${specs.tier_label} (${specs.specs_label})`;
-            badge.style.color = specs.color;
-          }
           updatePerformanceEstimate();
         })
         .catch(() => {});
@@ -763,44 +760,22 @@
 
     function updatePerformanceEstimate() {
       if (!systemSpecs) return;
-      const banner = document.getElementById('sys-estimate-banner');
-      if (!banner) return;
-
-      if (!primaryMesh || totalFaces === 0) {
-        banner.style.display = 'none';
-        return;
+      const badge = document.getElementById('sys-tier-badge');
+      const est = document.getElementById('sys-estimate-text');
+      if (badge) {
+        badge.innerText = systemSpecs.tier_label;
+        badge.style.color = systemSpecs.color;
+        badge.title = `Detected System: ${systemSpecs.specs_label}`;
       }
+      if (!est) return;
 
-      banner.style.display = 'block';
-
-      if (systemSpecs.tier === 'chromebook') {
-        banner.style.background = 'rgba(239, 68, 68, 0.15)';
-        banner.style.border = '1px solid rgba(239, 68, 68, 0.35)';
-        banner.style.color = '#fca5a5';
-        if (totalFaces > 500000) {
-          banner.innerHTML = `⚠️ <b>Low-Power / Chromebook Alert:</b> Processing <b>${totalFaces.toLocaleString()} faces</b> on this hardware will take a <b>LOOOONG time (5–15+ min)</b>. We strongly recommend enabling Decimation (100k–250k)!`;
-        } else {
-          banner.innerHTML = `ℹ Low-spec device detected. Model is lightweight (${totalFaces.toLocaleString()} faces), processing should take ~1–2 min.`;
-        }
-      } else if (systemSpecs.tier === 'mid_low') {
-        banner.style.background = 'rgba(245, 158, 11, 0.15)';
-        banner.style.border = '1px solid rgba(245, 158, 11, 0.35)';
-        banner.style.color = '#fde047';
-        if (totalFaces > 500000) {
-          banner.innerHTML = `⏳ <b>Budget System Notice:</b> Model has <b>${totalFaces.toLocaleString()} faces</b>. Estimated processing time: ~2–4 minutes.`;
-        } else {
-          banner.innerHTML = `✔ Budget PC detected. Model has ${totalFaces.toLocaleString()} faces (est. ~30–60s).`;
-        }
-      } else if (systemSpecs.tier === 'monster') {
-        banner.style.background = 'rgba(34, 197, 94, 0.15)';
-        banner.style.border = '1px solid rgba(34, 197, 94, 0.3)';
-        banner.style.color = '#86efac';
-        banner.innerHTML = `⚡ <b>Beast Rig:</b> ${systemSpecs.specs_label}. Ready for ultra-fast processing (~10–25s even on heavy models).`;
+      if (totalFaces > 1000000) {
+        if (systemSpecs.tier === 'fast') est.innerText = 'Expect ~15–30s on heavy mesh';
+        else if (systemSpecs.tier === 'good') est.innerText = 'Expect ~45–90s on heavy mesh';
+        else if (systemSpecs.tier === 'decent') est.innerText = 'Expect ~2–4 min. Decimation recommended';
+        else est.innerText = 'Expect ~15+ min. Decimation strongly recommended. Get a coffee ☕';
       } else {
-        banner.style.background = 'rgba(56, 189, 248, 0.15)';
-        banner.style.border = '1px solid rgba(56, 189, 248, 0.3)';
-        banner.style.color = '#7dd3fc';
-        banner.innerHTML = `💻 <b>Standard PC:</b> ${systemSpecs.specs_label}. Estimated processing time: ~30–75s.`;
+        est.innerText = systemSpecs.estimate_short;
       }
     }
 
@@ -1461,12 +1436,12 @@
 
       btn.disabled = true;
       progressFill.style.width = '15%';
-      if (systemSpecs && systemSpecs.tier === 'chromebook') {
-        statusLbl.innerText = 'Processing in Blender... (Low-spec hardware: grab a coffee ☕, this will take several minutes!)';
-      } else if (systemSpecs && systemSpecs.tier === 'mid_low') {
-        statusLbl.innerText = 'Processing in Blender... (Budget PC: may take 2–4 min on heavy models)';
+      if (systemSpecs && systemSpecs.tier === 'very_slow') {
+        statusLbl.innerText = 'Processing in Blender... (Very slow machine: grab a coffee ☕)';
+      } else if (systemSpecs && systemSpecs.tier === 'decent') {
+        statusLbl.innerText = 'Processing in Blender... (Decent machine: expect ~90s – 2 min)';
       } else {
-        statusLbl.innerText = 'Starting background processing...';
+        statusLbl.innerText = 'Processing in Blender... (Expect ~15–30s)';
       }
 
       const fmtObj = document.getElementById('chk-fmt-obj').checked;
