@@ -548,9 +548,9 @@
               </div>
               <div class="slider-header">
                 <span class="model-label">Nudge Cut Plane:</span>
-                <span class="slider-val" id="knife-offset-lbl">0.00 mm</span>
+                <span class="slider-val" id="knife-offset-lbl">0.0%</span>
               </div>
-              <input type="range" id="knife-offset-slider" min="-30" max="30" step="0.2" value="0" oninput="onKnifeOffsetSlider(this.value)">
+              <input type="range" id="knife-offset-slider" min="-25" max="25" step="0.5" value="0" oninput="onKnifeOffsetSlider(this.value)">
             </div>
 
             <!-- Axis Submode -->
@@ -1519,7 +1519,7 @@
         const slider = document.getElementById('knife-offset-slider');
         if (slider) slider.value = 0;
         const lbl = document.getElementById('knife-offset-lbl');
-        if (lbl) lbl.innerText = '0.00 mm';
+        if (lbl) lbl.innerText = '0.0%';
 
         updateKnifePlaneMesh();
         const statusEl = document.getElementById('knife-status-text');
@@ -1540,15 +1540,30 @@
     function flipCutSide() {
       if (knifeNormal) {
         knifeNormal.negate();
+        knifeOffset = -knifeOffset;
+        const slider = document.getElementById('knife-offset-slider');
+        if (slider) {
+          const pct = -parseFloat(slider.value || '0');
+          slider.value = pct;
+          const lbl = document.getElementById('knife-offset-lbl');
+          if (lbl) lbl.innerText = `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`;
+        }
         updateKnifePlaneMesh();
         renderPartTints();
       }
     }
 
     function onKnifeOffsetSlider(val) {
-      knifeOffset = parseFloat(val);
+      const pct = parseFloat(val);
+      let modelSpan = 1.0;
+      if (boundingBox) {
+        const size = new THREE.Vector3();
+        boundingBox.getSize(size);
+        modelSpan = Math.max(size.x, size.y, size.z) || 1.0;
+      }
+      knifeOffset = (pct / 100.0) * modelSpan;
       const lbl = document.getElementById('knife-offset-lbl');
-      if (lbl) lbl.innerText = `${knifeOffset.toFixed(2)} mm`;
+      if (lbl) lbl.innerText = `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`;
       updateKnifePlaneMesh();
       renderPartTints();
     }
@@ -1568,7 +1583,7 @@
       const slider = document.getElementById('knife-offset-slider');
       if (slider) slider.value = 0;
       const lbl = document.getElementById('knife-offset-lbl');
-      if (lbl) lbl.innerText = '0.00 mm';
+      if (lbl) lbl.innerText = '0.0%';
       renderPartTints();
     }
 
