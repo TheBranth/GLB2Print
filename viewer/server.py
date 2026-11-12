@@ -116,6 +116,7 @@ class UnifiedAppServer:
         self.last_heartbeat = time.time()
         self.is_running = True
         self.is_converting = False
+        self.original_filename = os.path.basename(initial_glb) if self.glb_path else ""
 
         self.ram_gb, self.cores = get_system_specs()
         self.system_info = classify_system(self.ram_gb, self.cores)
@@ -182,7 +183,7 @@ class UnifiedAppServer:
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
                     has_m = bool(parent_self.glb_path and os.path.isfile(parent_self.glb_path))
-                    fname = os.path.basename(parent_self.glb_path) if has_m else ""
+                    fname = parent_self.original_filename or (os.path.basename(parent_self.glb_path) if has_m else "")
                     self.wfile.write(json.dumps({"has_model": has_m, "filename": fname}).encode("utf-8"))
                     return
 
@@ -255,12 +256,22 @@ class UnifiedAppServer:
                         pdict['boundary'] = bytes(pdict['boundary'], "utf-8")
                         fields = cgi.parse_multipart(self.rfile, pdict)
                         file_data = fields.get('model', [None])[0]
+                        fname_raw = fields.get('filename', [None])[0]
+                        orig_fname = "model.glb"
+                        if fname_raw:
+                            if isinstance(fname_raw, bytes):
+                                orig_fname = fname_raw.decode("utf-8", errors="replace")
+                            else:
+                                orig_fname = str(fname_raw)
+                        clean_fname = os.path.basename(orig_fname)
+
                         if file_data:
                             temp_dir = tempfile.gettempdir()
-                            dest = os.path.join(temp_dir, f"uploaded_{int(time.time())}.glb")
+                            dest = os.path.join(temp_dir, f"uploaded_{int(time.time())}_{clean_fname}")
                             with open(dest, "wb") as f:
                                 f.write(file_data)
                             parent_self.glb_path = dest
+                            parent_self.original_filename = clean_fname
                             self.send_response(200)
                             self.send_header("Content-Type", "application/json")
                             self.end_headers()
@@ -279,9 +290,20 @@ class UnifiedAppServer:
                         content_length = int(self.headers.get("Content-Length", 0))
                         data = json.loads(self.rfile.read(content_length).decode("utf-8"))
 
-                        p = Path(parent_self.glb_path)
-                        out_dir = p.parent
-                        stem = p.stem
+                        # Save outputs cleanly into the 'outputs' subfolder in project root
+                        project_root = Path(__file__).resolve().parent.parent
+                        out_dir = project_root / "outputs"
+                        out_dir.mkdir(parents=True, exist_ok=True)
+
+                        # Determine clean model stem (e.g. "badger" instead of "uploaded_1794502815")
+                        if getattr(parent_self, 'original_filename', None):
+                            stem = Path(parent_self.original_filename).stem
+                        else:
+                            p = Path(parent_self.glb_path)
+                            stem = p.stem
+                            if stem.startswith("uploaded_"):
+                                parts = stem.split("_", 2)
+                                stem = parts[-1] if len(parts) >= 3 else "model"
 
                         fmt = data.get("format", "both")
                         out_obj = str(out_dir / f"{stem}.obj") if fmt in ("obj", "both") else None

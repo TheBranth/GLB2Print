@@ -1,4 +1,5 @@
 # 3D Model files (Never commit models)
+outputs/
 *.glb
 *.gltf
 *.obj

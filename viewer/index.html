@@ -1012,6 +1012,7 @@
     function uploadAndLoadModel(file) {
       const formData = new FormData();
       formData.append('model', file);
+      formData.append('filename', file.name);
       document.getElementById('loading-spinner-overlay').style.display = 'flex';
       document.getElementById('spinner-text').innerText = `Uploading ${file.name}...`;
 
