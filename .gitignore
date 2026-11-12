@@ -1,0 +1,37 @@
+# 3D Model files (Never commit models)
+*.glb
+*.gltf
+*.obj
+*.3mf
+*.stl
+*.ply
+*.fbx
+*.blend
+*.blend1
+
+# Local configuration
+glb2print_config.json
+
+# Python caches and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
