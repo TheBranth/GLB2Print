@@ -470,10 +470,10 @@
         <div class="card">
           <div class="card-title">Pre-Bake Texture Res</div>
           <div class="pill-group" id="tex-res-pills">
-            <div class="pill-btn" onclick="setTexRes(0)">Original</div>
-            <div class="pill-btn" onclick="setTexRes(2048)">2048px</div>
-            <div class="pill-btn active" onclick="setTexRes(1024)">1024px</div>
-            <div class="pill-btn" onclick="setTexRes(512)">512px</div>
+            <div class="pill-btn" onclick="setTexRes(0, this)">Original</div>
+            <div class="pill-btn" onclick="setTexRes(2048, this)">2048px</div>
+            <div class="pill-btn active" onclick="setTexRes(1024, this)">1024px</div>
+            <div class="pill-btn" onclick="setTexRes(512, this)">512px</div>
           </div>
         </div>
 
@@ -490,10 +490,10 @@
             <span class="slider-val" id="decimate-val-lbl">250,000 faces</span>
           </div>
           <input type="range" id="decimate-slider" min="50000" max="1000000" step="10000" value="250000" oninput="onDecimateSlider(this.value)">
-          <div class="pill-group" style="margin-top: 8px;">
-            <div class="pill-btn" onclick="setDecimatePreset(100000)">100k (Fast)</div>
-            <div class="pill-btn active" id="btn-pre-250" onclick="setDecimatePreset(250000)">250k (Sweetspot)</div>
-            <div class="pill-btn" onclick="setDecimatePreset(500000)">500k (Detail)</div>
+          <div class="pill-group" id="decimate-pills" style="margin-top: 8px;">
+            <div class="pill-btn" onclick="setDecimatePreset(100000, this)">100k (Fast)</div>
+            <div class="pill-btn active" id="btn-pre-250" onclick="setDecimatePreset(250000, this)">250k (Sweetspot)</div>
+            <div class="pill-btn" onclick="setDecimatePreset(500000, this)">500k (Detail)</div>
           </div>
         </div>
 
@@ -1344,11 +1344,12 @@
       updateMainButtonLabel();
     }
 
-    function setTexRes(val) {
+    function setTexRes(val, el) {
       currentTexRes = val;
       const pills = document.getElementById('tex-res-pills').children;
       for (let p of pills) p.classList.remove('active');
-      event.target.classList.add('active');
+      if (el) el.classList.add('active');
+      else if (typeof event !== 'undefined' && event && event.target) event.target.classList.add('active');
     }
 
     function toggleDecimate(enabled) {
@@ -1359,12 +1360,25 @@
     function onDecimateSlider(val) {
       currentDecimateCount = parseInt(val);
       document.getElementById('decimate-val-lbl').innerText = `${currentDecimateCount.toLocaleString()} faces`;
+      syncDecimatePills(currentDecimateCount);
     }
 
-    function setDecimatePreset(val) {
+    function setDecimatePreset(val, el) {
       currentDecimateCount = val;
       document.getElementById('decimate-slider').value = val;
       document.getElementById('decimate-val-lbl').innerText = `${val.toLocaleString()} faces`;
+      syncDecimatePills(val);
+    }
+
+    function syncDecimatePills(count) {
+      const pillGroup = document.getElementById('decimate-pills');
+      if (!pillGroup) return;
+      const pills = pillGroup.children;
+      if (pills.length >= 3) {
+        pills[0].classList.toggle('active', count === 100000);
+        pills[1].classList.toggle('active', count === 250000);
+        pills[2].classList.toggle('active', count === 500000);
+      }
     }
 
     function updateMainButtonLabel() {
