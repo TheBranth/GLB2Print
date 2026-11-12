@@ -295,6 +295,7 @@
       border-radius: 4px;
     }
     .hud-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+    .hud-btn.active { background: #2563eb; color: #ffffff; }
 
     #viewport-tips {
       position: absolute;
@@ -557,7 +558,7 @@
 
       <div id="viewport-hud">
         <button class="hud-btn" onclick="resetCamera()">⌖ Reset Camera</button>
-        <button class="hud-btn" onclick="toggleWireframe()">Mesh Wireframe</button>
+        <button class="hud-btn" id="btn-hud-wireframe" onclick="toggleWireframe()">Mesh Wireframe</button>
       </div>
 
       <div id="viewport-tips">
@@ -753,6 +754,9 @@
 
       if (model) scene.remove(model);
       model = null; primaryMesh = null; selectedFaceIndices.clear(); stagedParts = [];
+      isWireframeActive = false;
+      const wfBtn = document.getElementById('btn-hud-wireframe');
+      if (wfBtn) { wfBtn.classList.remove('active'); wfBtn.innerText = 'Mesh Wireframe'; }
 
       const url = customUrl || '/api/model.glb';
       const loader = new THREE.GLTFLoader();
@@ -869,6 +873,10 @@
         }
       });
 
+      // Prevent default right-click context menu so Right Click can orbit cleanly
+      renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+      lassoCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
       // Shift key shortcut for Lasso
       window.addEventListener('keydown', (e) => {
         if (e.key === 'Shift' && currentSplitMode === 'lasso' && !isLassoMode) {
@@ -881,23 +889,27 @@
         }
       });
 
-      // Lasso canvas drawing
-      lassoCanvas.addEventListener('mousedown', (e) => {
+      // Lasso canvas drawing: Left-Click draws, Right-Click orbits camera!
+      renderer.domElement.addEventListener('pointerdown', (e) => {
         if (!isLassoMode) return;
-        isDrawingLasso = true;
-        const rect = lassoCanvas.getBoundingClientRect();
-        lassoPoints = [[e.clientX - rect.left, e.clientY - rect.top]];
-        drawLassoPath();
-      });
+        if (e.button === 0) { // Left-click: Draw Lasso
+          e.stopImmediatePropagation();
+          isDrawingLasso = true;
+          const rect = lassoCanvas.getBoundingClientRect();
+          lassoPoints = [[e.clientX - rect.left, e.clientY - rect.top]];
+          drawLassoPath();
+        }
+        // If e.button === 2 (Right-click), OrbitControls will receive it and orbit the camera!
+      }, true);
 
-      window.addEventListener('mousemove', (e) => {
+      window.addEventListener('pointermove', (e) => {
         if (!isDrawingLasso) return;
         const rect = lassoCanvas.getBoundingClientRect();
         lassoPoints.push([e.clientX - rect.left, e.clientY - rect.top]);
         drawLassoPath();
       });
 
-      window.addEventListener('mouseup', () => {
+      window.addEventListener('pointerup', (e) => {
         if (!isDrawingLasso) return;
         isDrawingLasso = false;
         if (lassoPoints.length > 3) executeLassoSelection();
@@ -940,11 +952,29 @@
       else isLassoMode = !isLassoMode;
 
       const btn = document.getElementById('btn-draw-lasso');
+      const tips = document.getElementById('viewport-tips');
       btn.classList.toggle('active', isLassoMode);
-      btn.innerText = isLassoMode ? '🔴 Drawing Mode (Drag Loop)' : '🖊 Draw Selection Lasso (Shift)';
+      btn.innerText = isLassoMode ? '🔴 Drawing Mode (Left-Click to Lasso)' : '🖊 Draw Selection Lasso (Shift)';
 
-      controls.enabled = !isLassoMode;
-      lassoCanvas.classList.toggle('drawing', isLassoMode);
+      if (isLassoMode) {
+        // In Lasso mode: Left click draws lasso, Right click orbits camera, Scroll zooms!
+        controls.mouseButtons = {
+          LEFT: null,
+          MIDDLE: THREE.MOUSE.PAN,
+          RIGHT: THREE.MOUSE.ROTATE
+        };
+        tips.innerHTML = '<b>Left Click:</b> Draw Lasso &nbsp;|&nbsp; <b>Right Click:</b> Orbit Camera &nbsp;|&nbsp; <b>Scroll:</b> Zoom';
+      } else {
+        // In Normal mode: Left click orbits camera, Right click pans, Scroll zooms!
+        controls.mouseButtons = {
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.PAN
+        };
+        tips.innerHTML = 'Left Click: Orbit &nbsp;|&nbsp; Right Click: Pan &nbsp;|&nbsp; Scroll: Zoom &nbsp;|&nbsp; <b>Hold Shift</b> to draw lasso';
+      }
+
+      controls.enabled = true;
     }
 
     function drawLassoPath() {
@@ -1268,9 +1298,20 @@
       controls.update();
     }
 
+    let isWireframeActive = false;
     function toggleWireframe() {
-      if (primaryMesh) {
-        primaryMesh.material.wireframe = !primaryMesh.material.wireframe;
+      if (!model) return;
+      isWireframeActive = !isWireframeActive;
+      model.traverse(child => {
+        if (child.isMesh && child.material) {
+          child.material.wireframe = isWireframeActive;
+          child.material.needsUpdate = true;
+        }
+      });
+      const btn = document.getElementById('btn-hud-wireframe');
+      if (btn) {
+        btn.classList.toggle('active', isWireframeActive);
+        btn.innerText = isWireframeActive ? '🕸 Wireframe: ON' : 'Mesh Wireframe';
       }
     }
 
