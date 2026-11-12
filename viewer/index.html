@@ -491,9 +491,10 @@
           </div>
           <input type="range" id="decimate-slider" min="50000" max="1000000" step="10000" value="250000" oninput="onDecimateSlider(this.value)">
           <div class="pill-group" id="decimate-pills" style="margin-top: 8px;">
-            <div class="pill-btn" onclick="setDecimatePreset(100000, this)">100k (Fast)</div>
-            <div class="pill-btn active" id="btn-pre-250" onclick="setDecimatePreset(250000, this)">250k (Sweetspot)</div>
-            <div class="pill-btn" onclick="setDecimatePreset(500000, this)">500k (Detail)</div>
+            <div class="pill-btn" onclick="setDecimatePreset(100000, this)">100k</div>
+            <div class="pill-btn active" id="btn-pre-250" onclick="setDecimatePreset(250000, this)">250k</div>
+            <div class="pill-btn" onclick="setDecimatePreset(500000, this)">500k</div>
+            <div class="pill-btn" onclick="setDecimatePreset(0, this)">100% (Full Detail)</div>
           </div>
         </div>
 
@@ -1727,6 +1728,15 @@
     function toggleDecimate(enabled) {
       isDecimateEnabled = enabled;
       document.getElementById('decimate-slider').disabled = !enabled;
+      if (!enabled) {
+        currentDecimateCount = 0;
+        document.getElementById('decimate-val-lbl').innerText = `100% (No Decimation - Full Sculpt Detail)`;
+        syncDecimatePills(0);
+      } else {
+        currentDecimateCount = parseInt(document.getElementById('decimate-slider').value) || 250000;
+        document.getElementById('decimate-val-lbl').innerText = `${currentDecimateCount.toLocaleString()} faces`;
+        syncDecimatePills(currentDecimateCount);
+      }
     }
 
     function onDecimateSlider(val) {
@@ -1737,8 +1747,19 @@
 
     function setDecimatePreset(val, el) {
       currentDecimateCount = val;
-      document.getElementById('decimate-slider').value = val;
-      document.getElementById('decimate-val-lbl').innerText = `${val.toLocaleString()} faces`;
+      const chk = document.getElementById('chk-decimate');
+      if (val === 0) {
+        if (chk) chk.checked = false;
+        isDecimateEnabled = false;
+        document.getElementById('decimate-slider').disabled = true;
+        document.getElementById('decimate-val-lbl').innerText = `100% (No Decimation - Full Sculpt Detail)`;
+      } else {
+        if (chk) chk.checked = true;
+        isDecimateEnabled = true;
+        document.getElementById('decimate-slider').disabled = false;
+        document.getElementById('decimate-slider').value = val;
+        document.getElementById('decimate-val-lbl').innerText = `${val.toLocaleString()} faces`;
+      }
       syncDecimatePills(val);
     }
 
@@ -1746,10 +1767,11 @@
       const pillGroup = document.getElementById('decimate-pills');
       if (!pillGroup) return;
       const pills = pillGroup.children;
-      if (pills.length >= 3) {
+      if (pills.length >= 4) {
         pills[0].classList.toggle('active', count === 100000);
         pills[1].classList.toggle('active', count === 250000);
         pills[2].classList.toggle('active', count === 500000);
+        pills[3].classList.toggle('active', count === 0);
       }
     }
 

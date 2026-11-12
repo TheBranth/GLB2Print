@@ -398,24 +398,28 @@ def main():
 
             bm = bmesh.new()
             bm.from_mesh(part_obj.data)
+
+            # 1. Identify ONLY the real cut seam edges (edges between keep_set and del_faces)
+            # NEVER treat original model boundary openings (eyes, nostrils, filigree cutouts) as cut seams!
+            cut_seam_edges = set()
+            for e in bm.edges:
+                if len(e.link_faces) == 2:
+                    f0, f1 = e.link_faces
+                    if (f0.index in keep_set) != (f1.index in keep_set):
+                        cut_seam_edges.add(e)
+
             del_faces = [f for f in bm.faces if f.index not in keep_set]
             bmesh.ops.delete(bm, geom=del_faces, context='FACES')
 
-            # Cap boundaries if requested
-            if args.split_cap:
+            # Cap boundaries if requested - ONLY on the actual cut seam edges!
+            if args.split_cap and cut_seam_edges:
                 try:
-                    b_edges = [e for e in bm.edges if e.is_boundary]
-                    if b_edges:
-                        log(f"Attempting boundary capping on {len(b_edges)} boundary edges for '{safe_name}'...")
-                        res = bmesh.ops.edgenet_fill(bm, edges=b_edges)
+                    valid_seam_edges = [e for e in cut_seam_edges if e.is_valid and e.is_boundary]
+                    if valid_seam_edges:
+                        log(f"Attempting cut-seam capping on {len(valid_seam_edges)} seam edges for '{safe_name}'...")
+                        res = bmesh.ops.edgenet_fill(bm, edges=valid_seam_edges)
                 except Exception as cap_err:
-                    log(f"WARNING: edgenet_fill failed ({cap_err}), attempting holes_fill fallback...")
-                    try:
-                        b_edges2 = [e for e in bm.edges if e.is_boundary]
-                        if b_edges2:
-                            bmesh.ops.holes_fill(bm, edges=b_edges2, sides=0)
-                    except Exception as h_err:
-                        log(f"WARNING: Boundary hole capping skipped for '{safe_name}': {h_err}")
+                    log(f"Cut-seam capping skipped for '{safe_name}': {cap_err}")
 
             # ALWAYS triangulate all faces so slicers never encounter N-gons (> 4 vertices)
             bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
@@ -429,8 +433,10 @@ def main():
                 ratio = args.decimate_ratio
                 if args.target_triangles > 0 and len(part_obj.data.polygons) > args.target_triangles:
                     ratio = args.target_triangles / float(len(part_obj.data.polygons))
+                log(f"Decimating part '{safe_name}' from {len(part_obj.data.polygons)} to target ratio {ratio:.3f}...")
                 mod = part_obj.modifiers.new(name='Decimate', type='DECIMATE')
                 mod.ratio = float(ratio)
+                mod.use_collapse_triangulate = True
                 bpy.context.view_layer.objects.active = part_obj
                 bpy.ops.object.modifier_apply(modifier='Decimate')
 
