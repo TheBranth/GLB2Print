@@ -37,6 +37,11 @@ def parse_args():
     # Smart Splitting / Planar Cut options
     parser.add_argument("--split-axis", choices=["none", "x", "y", "z"], default="none", help="Cut plane normal axis")
     parser.add_argument("--split-coord", type=float, default=0.0, help="Cut plane position along split axis")
+    parser.add_argument("--plane-point", default="", help="Arbitrary cut plane point 'x,y,z'")
+    parser.add_argument("--plane-normal", default="", help="Arbitrary cut plane normal 'nx,ny,nz'")
+    parser.add_argument("--add-pegs", action="store_true", help="Add snap-fit male peg & female socket at cut interface")
+    parser.add_argument("--peg-radius", type=float, default=2.0, help="Radius of alignment peg in mm (default: 2.0)")
+    parser.add_argument("--peg-height", type=float, default=5.0, help="Height of alignment peg in mm (default: 5.0)")
     parser.add_argument("--split-cap", action="store_true", default=True, help="Cap cut surfaces for watertight printing")
     parser.add_argument("--no-split-cap", dest="split_cap", action="store_false", help="Do not cap cut surfaces")
 
@@ -163,6 +168,100 @@ def bisect_mesh(obj, plane_co, plane_no, clear_outer, clear_inner, cap_cut):
 
     bm.to_mesh(obj.data)
     bm.free()
+
+def add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=2.0, peg_height=5.0, clearance=0.2):
+    """
+    Creates a snap-fit male peg on part1 and a matching female socket hole on part2
+    at the centroid of the planar cut interface.
+    """
+    import mathutils
+    plane_co = mathutils.Vector(plane_co)
+    plane_no = mathutils.Vector(plane_no).normalized()
+
+    # Find vertices on the cut interface
+    verts1 = [v.co for v in part1.data.vertices if abs((v.co - plane_co).dot(plane_no)) < 0.25]
+    if not verts1 or len(verts1) < 3:
+        log("Cut interface vertices not clearly identified; placing peg at cut origin.")
+        centroid = plane_co
+    else:
+        centroid = sum(verts1, mathutils.Vector((0.0, 0.0, 0.0))) / len(verts1)
+        # Check boundary spread to prevent oversized pegs on thin walls
+        dists = [(v - centroid).length for v in verts1]
+        spread = min(dists) if dists else 10.0
+        if spread < peg_radius * 1.5:
+            adj_radius = max(0.8, spread * 0.45)
+            log(f"Cut surface is narrow (spread: {spread:.2f}mm); adjusting peg radius from {peg_radius:.1f}mm to {adj_radius:.2f}mm")
+            peg_radius = adj_radius
+
+    quat = mathutils.Vector((0.0, 0.0, 1.0)).rotation_difference(plane_no)
+    euler = quat.to_euler()
+
+    # 1. Male Peg on Part 1 (protruding along plane_no)
+    log(f"Adding male snap peg (radius={peg_radius:.2f}mm, height={peg_height:.2f}mm) at {centroid}...")
+    try:
+        bm1 = bmesh.new()
+        bm1.from_mesh(part1.data)
+        peg_loc = centroid + plane_no * (peg_height / 2.0 - 0.5)
+        M = mathutils.Matrix.Translation(peg_loc) @ quat.to_matrix().to_4x4()
+        bmesh.ops.create_cone(
+            bm1,
+            cap_ends=True,
+            segments=24,
+            radius1=peg_radius,
+            radius2=peg_radius,
+            depth=peg_height + 1.0,
+            matrix=M
+        )
+        bmesh.ops.triangulate(bm1, faces=bm1.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+        bmesh.ops.recalc_face_normals(bm1, faces=bm1.faces[:])
+        bm1.to_mesh(part1.data)
+        bm1.free()
+        log(f"Male peg integrated cleanly into Part 1 ({len(part1.data.vertices)} verts).")
+    except Exception as e:
+        log(f"WARNING: Could not integrate male peg: {e}")
+
+    # 2. Female Socket on Part 2 (recessed along plane_no with clearance)
+    socket_radius = peg_radius + clearance
+    socket_depth = peg_height + 0.6
+    socket_loc = centroid + plane_no * (socket_depth / 2.0)
+    log(f"Carving female socket hole (radius={socket_radius:.2f}mm, depth={socket_depth:.2f}mm) into Part 2...")
+    init_v2 = len(part2.data.vertices)
+    part2_backup = part2.data.copy()
+    try:
+        bpy.ops.mesh.primitive_cylinder_add(
+            vertices=24,
+            radius=socket_radius,
+            depth=socket_depth,
+            location=socket_loc,
+            rotation=euler
+        )
+        socket_obj = bpy.context.active_object
+        mod_diff = part2.modifiers.new(name='SocketDiff', type='BOOLEAN')
+        mod_diff.operation = 'DIFFERENCE'
+        mod_diff.object = socket_obj
+        mod_diff.solver = 'EXACT'
+        bpy.context.view_layer.objects.active = part2
+        bpy.ops.object.modifier_apply(modifier='SocketDiff')
+        bpy.data.objects.remove(socket_obj, do_unlink=True)
+
+        if len(part2.data.vertices) < init_v2 * 0.5:
+            log(f"WARNING: Socket boolean on non-manifold surface caused geometry collapse ({len(part2.data.vertices)} < {init_v2}); retaining clean flat cut face.")
+            part2.data = part2_backup
+        else:
+            log(f"Female socket carved cleanly into Part 2 ({len(part2.data.vertices)} verts).")
+            bpy.data.meshes.remove(part2_backup, do_unlink=True)
+    except Exception as e:
+        log(f"WARNING: Could not apply female socket boolean: {e}")
+        part2.data = part2_backup
+
+    # Triangulate and recalculate face normals for both parts
+    for p in [part1, part2]:
+        bm = bmesh.new()
+        bm.from_mesh(p.data)
+        bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+        bm.to_mesh(p.data)
+        bm.free()
 
 def main():
     args = parse_args()
@@ -346,24 +445,36 @@ def main():
             log(f"Part '{safe_name}' exported and memory freed.")
 
     # 7. Check if Planar Cut is requested
-    elif args.split_axis != "none":
-        axis = args.split_axis.lower()
-        coord = args.split_coord
-        log(f"PLANAR CUT: Splitting model along {axis.upper()} axis at coordinate {coord:.3f} (Cap: {args.split_cap})...")
+    elif (args.plane_point and args.plane_normal) or (args.split_axis != "none"):
+        if args.plane_point and args.plane_normal:
+            try:
+                co_vals = [float(x.strip()) for x in args.plane_point.split(",")]
+                no_vals = [float(x.strip()) for x in args.plane_normal.split(",")]
+                plane_co = (co_vals[0], co_vals[1], co_vals[2])
+                plane_no = (no_vals[0], no_vals[1], no_vals[2])
+                log(f"PLANAR CUT: Using arbitrary knife plane. Point={plane_co}, Normal={plane_no} (Cap: {args.split_cap}, Pegs: {args.add_pegs})...")
+            except Exception as e:
+                log(f"ERROR parsing plane coords ({e}), falling back to X axis.")
+                plane_no = (1.0, 0.0, 0.0)
+                plane_co = (0.0, 0.0, 0.0)
+        else:
+            axis = args.split_axis.lower()
+            coord = args.split_coord
+            log(f"PLANAR CUT: Splitting model along {axis.upper()} axis at coordinate {coord:.3f} (Cap: {args.split_cap}, Pegs: {args.add_pegs})...")
 
-        plane_normals = {
-            "x": (1.0, 0.0, 0.0),
-            "y": (0.0, 1.0, 0.0),
-            "z": (0.0, 0.0, 1.0)
-        }
-        plane_coords = {
-            "x": (coord, 0.0, 0.0),
-            "y": (0.0, coord, 0.0),
-            "z": (0.0, 0.0, coord)
-        }
+            plane_normals = {
+                "x": (1.0, 0.0, 0.0),
+                "y": (0.0, 1.0, 0.0),
+                "z": (0.0, 0.0, 1.0)
+            }
+            plane_coords = {
+                "x": (coord, 0.0, 0.0),
+                "y": (0.0, coord, 0.0),
+                "z": (0.0, 0.0, coord)
+            }
 
-        plane_no = plane_normals[axis]
-        plane_co = plane_coords[axis]
+            plane_no = plane_normals.get(axis, (1.0, 0.0, 0.0))
+            plane_co = plane_coords.get(axis, (0.0, 0.0, 0.0))
 
         part1 = obj
         part1.name = "Part_1"
@@ -375,6 +486,9 @@ def main():
 
         bisect_mesh(part1, plane_co, plane_no, clear_outer=True, clear_inner=False, cap_cut=args.split_cap)
         bisect_mesh(part2, plane_co, plane_no, clear_outer=False, clear_inner=True, cap_cut=args.split_cap)
+
+        if args.add_pegs and args.split_cap:
+            add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=args.peg_radius, peg_height=args.peg_height)
 
         p1_obj = split_path(args.output_obj, "part1")
         p2_obj = split_path(args.output_obj, "part2")

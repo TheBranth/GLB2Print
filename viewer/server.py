@@ -315,7 +315,15 @@ class UnifiedAppServer:
                         cap_cut = bool(data.get("cap_cut", True))
                         parts_data = data.get("parts", None)
 
-                        if split_mode == "lasso" and parts_data:
+                        plane_point = data.get("plane_point", None)
+                        plane_normal = data.get("plane_normal", None)
+                        plane_pt_str = ",".join(str(float(x)) for x in plane_point) if (plane_point and len(plane_point) == 3) else None
+                        plane_no_str = ",".join(str(float(x)) for x in plane_normal) if (plane_normal and len(plane_normal) == 3) else None
+                        add_pegs = bool(data.get("add_pegs", False))
+                        peg_radius = float(data.get("peg_radius", 2.0))
+                        peg_height = float(data.get("peg_height", 5.0))
+
+                        if parts_data:
                             with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tf:
                                 json.dump(parts_data, tf)
                                 temp_json = tf.name
@@ -331,6 +339,11 @@ class UnifiedAppServer:
                             split_axis=split_axis if split_mode == "planar" else "none",
                             split_coord=split_coord,
                             split_cap=cap_cut,
+                            plane_point=plane_pt_str if split_mode == "planar" else None,
+                            plane_normal=plane_no_str if split_mode == "planar" else None,
+                            add_pegs=add_pegs if split_mode == "planar" else False,
+                            peg_radius=peg_radius,
+                            peg_height=peg_height,
                             parts_json=temp_json
                         )
 

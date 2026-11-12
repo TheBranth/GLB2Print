@@ -26,6 +26,11 @@ class ConversionJob:
                  split_axis: str = "none",
                  split_coord: float = 0.0,
                  split_cap: bool = True,
+                 plane_point: Optional[str] = None,
+                 plane_normal: Optional[str] = None,
+                 add_pegs: bool = False,
+                 peg_radius: float = 2.0,
+                 peg_height: float = 5.0,
                  parts_json: Optional[str] = None,
                  log_callback: Optional[Callable[[str], None]] = None,
                  progress_callback: Optional[Callable[[float, str], None]] = None):
@@ -41,6 +46,11 @@ class ConversionJob:
         self.split_axis = split_axis.lower()
         self.split_coord = split_coord
         self.split_cap = split_cap
+        self.plane_point = plane_point
+        self.plane_normal = plane_normal
+        self.add_pegs = add_pegs
+        self.peg_radius = peg_radius
+        self.peg_height = peg_height
         self.parts_json = os.path.abspath(parts_json) if parts_json else ""
         self.log_callback = log_callback or (lambda msg: None)
         self.progress_callback = progress_callback or (lambda pct, msg: None)
@@ -53,8 +63,10 @@ class ConversionJob:
         log_info(f"Settings: TexRes={self.texture_res}, TargetTris={self.target_triangles}, GroundZ={self.ground_z}")
         if self.parts_json:
             log_info(f"Multi-Part Mode JSON: {self.parts_json}")
+        elif self.plane_point and self.plane_normal:
+            log_info(f"Planar Cut Mode (Knife Plane): Point={self.plane_point}, Normal={self.plane_normal}, Cap={self.split_cap}, Pegs={self.add_pegs}")
         elif self.split_axis != "none":
-            log_info(f"Planar Cut Mode: Axis={self.split_axis}, Coord={self.split_coord}, Cap={self.split_cap}")
+            log_info(f"Planar Cut Mode: Axis={self.split_axis}, Coord={self.split_coord}, Cap={self.split_cap}, Pegs={self.add_pegs}")
 
         if not os.path.isfile(self.input_glb):
             err_msg = f"Input file does not exist: {self.input_glb}"
@@ -91,6 +103,13 @@ class ConversionJob:
 
         if not self.split_cap:
             cmd.append("--no-split-cap")
+
+        if self.plane_point and self.plane_normal:
+            cmd.extend(["--plane-point", self.plane_point, "--plane-normal", self.plane_normal])
+
+        if self.add_pegs:
+            cmd.append("--add-pegs")
+            cmd.extend(["--peg-radius", str(self.peg_radius), "--peg-height", str(self.peg_height)])
 
         if self.parts_json:
             cmd.extend(["--parts-json", self.parts_json])

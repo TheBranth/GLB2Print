@@ -509,17 +509,55 @@
           <!-- PLANAR PANEL -->
           <div id="deck-planar" style="display: none;">
             <div class="pill-group" style="margin-bottom: 8px;">
-              <div class="pill-btn active" id="btn-plane-x" onclick="setPlanarAxis('X')">X (L/R)</div>
-              <div class="pill-btn" id="btn-plane-y" onclick="setPlanarAxis('Y')">Y (F/B)</div>
-              <div class="pill-btn" id="btn-plane-z" onclick="setPlanarAxis('Z')">Z (T/B)</div>
+              <div class="pill-btn active" id="btn-planar-knife" onclick="setPlanarSubMode('knife')">🎯 2-Click Knife</div>
+              <div class="pill-btn" id="btn-planar-axis" onclick="setPlanarSubMode('axis')">🌐 World Axes</div>
             </div>
-            <div class="slider-header">
-              <span class="model-label">Cut Plane Position:</span>
-              <span class="slider-val" id="plane-coord-lbl">0.00 mm</span>
+
+            <!-- Knife Submode -->
+            <div id="planar-knife-controls">
+              <div style="background: rgba(56, 189, 248, 0.08); border: 1px dashed rgba(56, 189, 248, 0.35); border-radius: 6px; padding: 7px 10px; margin-bottom: 8px; font-size: 0.73rem; line-height: 1.4;">
+                <div id="knife-status-text" style="color: #38bdf8; font-weight: 700;">
+                  👆 Click on model to set Point A (cut start)
+                </div>
+                <div style="color: #9ca3af; font-size: 0.69rem; margin-top: 2px;">
+                  Click 2 points across any joint to slice on bias. Orbit freely with drag.
+                </div>
+              </div>
+              <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                <button class="btn-file" style="padding: 4px;" onclick="flipCutSide()">⇄ Flip Side</button>
+                <button class="btn-file" style="padding: 4px;" onclick="resetKnifePoints()">🔄 Reset</button>
+                <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="detachCurrentSliceToPart()">✂ Detach to Part</button>
+              </div>
+              <div class="slider-header">
+                <span class="model-label">Nudge Cut Plane:</span>
+                <span class="slider-val" id="knife-offset-lbl">0.00 mm</span>
+              </div>
+              <input type="range" id="knife-offset-slider" min="-30" max="30" step="0.2" value="0" oninput="onKnifeOffsetSlider(this.value)">
             </div>
-            <input type="range" id="plane-slider" min="-100" max="100" step="0.1" value="0" oninput="onPlaneSlider(this.value)">
-            <div style="display: flex; justify-content: space-between; margin-top: 6px;">
-              <button class="btn-file" style="padding: 4px;" onclick="centerPlane()">⌖ Center Plane</button>
+
+            <!-- Axis Submode -->
+            <div id="planar-axis-controls" style="display: none;">
+              <div class="pill-group" style="margin-bottom: 8px;">
+                <div class="pill-btn active" id="btn-plane-x" onclick="setPlanarAxis('X')">X (L/R)</div>
+                <div class="pill-btn" id="btn-plane-y" onclick="setPlanarAxis('Y')">Y (F/B)</div>
+                <div class="pill-btn" id="btn-plane-z" onclick="setPlanarAxis('Z')">Z (T/B)</div>
+              </div>
+              <div class="slider-header">
+                <span class="model-label">Cut Plane Position:</span>
+                <span class="slider-val" id="plane-coord-lbl">0.00 mm</span>
+              </div>
+              <input type="range" id="plane-slider" min="-100" max="100" step="0.1" value="0" oninput="onPlaneSlider(this.value)">
+              <div style="display: flex; justify-content: space-between; margin-top: 6px; margin-bottom: 6px;">
+                <button class="btn-file" style="padding: 4px;" onclick="centerPlane()">⌖ Center Plane</button>
+                <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="detachCurrentSliceToPart()">✂ Detach to Part</button>
+              </div>
+            </div>
+
+            <!-- Snap Peg Option -->
+            <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
+              <label class="check-row" title="Adds snap-fit male alignment pin on Part 1 and matching 0.2mm tolerance socket hole on Part 2">
+                <input type="checkbox" id="chk-add-pegs" checked> 🧩 Add Snap Pegs & Sockets (Snap-fit)
+              </label>
             </div>
           </div>
 
@@ -541,10 +579,18 @@
               <button class="btn-file" style="padding: 4px;" onclick="invertSelection()">Invert</button>
               <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="createPartFromSelection()">+ Add Part</button>
             </div>
+          </div>
+
+          <!-- UNIFIED STAGED PARTS LIST (Shared by Planar Cut & Lasso Split) -->
+          <div id="staged-parts-container" style="display: none; margin-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span class="model-label" style="font-weight: 600;">Staged Parts (<span id="staged-parts-count">0</span>):</span>
+              <button class="btn-file" style="padding: 2px 6px; font-size: 0.68rem;" onclick="clearAllStagedParts()">Clear All</button>
+            </div>
             <div class="parts-list" id="staged-parts-box">
               <!-- Dynamically populated parts -->
             </div>
-            <button class="btn-file" style="width: 100%; margin-top: 2px;" onclick="autoAssignRemaining()">⚡ Auto-Assign Remaining to Part</button>
+            <button class="btn-file" style="width: 100%; margin-top: 4px;" onclick="autoAssignRemaining()">⚡ Auto-Assign Remaining to Part</button>
           </div>
 
           <!-- CAPPING OPTION -->
@@ -697,6 +743,17 @@
     let currentDecimateCount = 250000;
     let isDecimateEnabled = true;
 
+    // Planar Cut & 2-Click Knife State
+    let planarSubMode = 'knife'; // 'knife' or 'axis'
+    let knifePointA = null;
+    let knifePointB = null;
+    let knifeMidpoint = null;
+    let knifeNormal = null;
+    let knifeOffset = 0.0;
+    let knifeMarkerA = null;
+    let knifeMarkerB = null;
+    let knifeLine = null;
+
     // Lasso drawing state
     let isLassoMode = false;
     let isDrawingLasso = false;
@@ -739,6 +796,7 @@
       lassoCanvas = document.getElementById('lasso-canvas');
       lassoCtx = lassoCanvas.getContext('2d');
       resizeLassoCanvas();
+      initKnifeVisuals();
 
       setupEventListeners();
       setupHeartbeat();
@@ -886,6 +944,12 @@
         controls.update();
 
         createCutPlane(size, center);
+        if (knifeMarkerA && knifeMarkerB) {
+          const markerRad = maxDim * 0.016;
+          knifeMarkerA.scale.set(markerRad, markerRad, markerRad);
+          knifeMarkerB.scale.set(markerRad, markerRad, markerRad);
+        }
+        resetKnifePoints();
         setPlanarAxis('X');
 
         document.getElementById('empty-state-overlay').style.display = 'none';
@@ -980,8 +1044,14 @@
         }
       });
 
+      // Pointer down tracking for clicks vs orbit
+      let pointerDownX = 0, pointerDownY = 0, pointerDownTime = 0;
+
       // Lasso canvas drawing: Left-Click draws, Right-Click orbits camera!
       renderer.domElement.addEventListener('pointerdown', (e) => {
+        pointerDownX = e.clientX;
+        pointerDownY = e.clientY;
+        pointerDownTime = performance.now();
         if (!isLassoMode) return;
         if (e.button === 0) { // Left-click: Draw Lasso
           e.stopImmediatePropagation();
@@ -1001,11 +1071,32 @@
       });
 
       window.addEventListener('pointerup', (e) => {
-        if (!isDrawingLasso) return;
-        isDrawingLasso = false;
-        if (lassoPoints.length > 3) executeLassoSelection();
-        lassoCtx.clearRect(0, 0, lassoCanvas.width, lassoCanvas.height);
-        lassoPoints = [];
+        if (isDrawingLasso) {
+          isDrawingLasso = false;
+          if (lassoPoints.length > 3) executeLassoSelection();
+          lassoCtx.clearRect(0, 0, lassoCanvas.width, lassoCanvas.height);
+          lassoPoints = [];
+          return;
+        }
+
+        // Detect clean single click on model for 2-Click Knife Plane
+        if (currentSplitMode === 'planar' && planarSubMode === 'knife' && e.button === 0 && primaryMesh) {
+          const moveDist = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
+          const clickDuration = performance.now() - pointerDownTime;
+          if (moveDist < 6 && clickDuration < 400) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+              ((e.clientX - rect.left) / rect.width) * 2 - 1,
+              -((e.clientY - rect.top) / rect.height) * 2 + 1
+            );
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
+            const hits = raycaster.intersectObject(primaryMesh);
+            if (hits.length > 0) {
+              handleKnifePointClick(hits[0].point);
+            }
+          }
+        }
       });
     }
 
@@ -1216,9 +1307,29 @@
       updateMainButtonLabel();
     }
 
+    function clearAllStagedParts() {
+      if (stagedParts.length === 0) return;
+      if (confirm("Clear all staged parts?")) {
+        stagedParts = [];
+        refreshPartsDeckUI();
+        renderPartTints();
+        updateMainButtonLabel();
+      }
+    }
+
     function refreshPartsDeckUI() {
       const box = document.getElementById('staged-parts-box');
+      const countLbl = document.getElementById('staged-parts-count');
+      const container = document.getElementById('staged-parts-container');
+      if (countLbl) countLbl.innerText = stagedParts.length;
+      if (container && (currentSplitMode === 'planar' || currentSplitMode === 'lasso')) {
+        container.style.display = 'block';
+      }
       box.innerHTML = '';
+      if (stagedParts.length === 0) {
+        box.innerHTML = '<div style="color: #64748b; font-size: 0.72rem; text-align: center; padding: 6px;">No parts staged yet. Click "Detach to Part" or draw lasso to stage.</div>';
+        return;
+      }
       stagedParts.forEach(p => {
         const item = document.createElement('div');
         item.className = 'part-item';
@@ -1246,12 +1357,40 @@
       colAttr.copy(originalVertexColors);
       const faceTints = new Map();
 
+      // 1. Tints for staged parts
       stagedParts.forEach(part => {
         const [pr, pg, pb] = [part.rgb[0] / 255.0, part.rgb[1] / 255.0, part.rgb[2] / 255.0];
         part.faces.forEach(f => faceTints.set(f, [pr, pg, pb]));
       });
 
+      // 2. Tints for lasso selection
       selectedFaceIndices.forEach(f => faceTints.set(f, [0.98, 0.75, 0.14]));
+
+      // 3. Live tint for active planar cut side
+      if (currentSplitMode === 'planar') {
+        let pPos = null, pNo = null;
+        if (planarSubMode === 'knife' && knifeMidpoint && knifeNormal) {
+          pPos = knifeMidpoint.clone().addScaledVector(knifeNormal, knifeOffset);
+          pNo = knifeNormal;
+        } else if (planarSubMode === 'axis' && boundingBox) {
+          const center = new THREE.Vector3(); boundingBox.getCenter(center);
+          if (currentPlaneAxis === 'X') { pPos = new THREE.Vector3(currentPlaneCoord, center.y, center.z); pNo = new THREE.Vector3(1, 0, 0); }
+          else if (currentPlaneAxis === 'Y') { pPos = new THREE.Vector3(center.x, currentPlaneCoord, center.z); pNo = new THREE.Vector3(0, 1, 0); }
+          else { pPos = new THREE.Vector3(center.x, center.y, currentPlaneCoord); pNo = new THREE.Vector3(0, 0, 1); }
+        }
+
+        if (pPos && pNo) {
+          const fW = new THREE.Vector3();
+          const wMat = primaryMesh.matrixWorld;
+          for (let i = 0; i < totalFaces; i++) {
+            if (faceTints.has(i)) continue; // already staged
+            fW.set(faceCenters[i * 3], faceCenters[i * 3 + 1], faceCenters[i * 3 + 2]).applyMatrix4(wMat);
+            if (fW.sub(pPos).dot(pNo) > 0) {
+              faceTints.set(i, [0.22, 0.74, 0.97]); // Soft translucent cyan for live cut preview
+            }
+          }
+        }
+      }
 
       faceTints.forEach(([tr, tg, tb], fIdx) => {
         let v0, v1, v2;
@@ -1263,10 +1402,226 @@
 
         [v0, v1, v2].forEach(v => {
           const r = colAttr.getX(v), g = colAttr.getY(v), b = colAttr.getZ(v);
-          colAttr.setXYZ(v, r * 0.4 + tr * 0.6, g * 0.4 + tg * 0.6, b * 0.4 + tb * 0.6);
+          colAttr.setXYZ(v, r * 0.45 + tr * 0.55, g * 0.45 + tg * 0.55, b * 0.45 + tb * 0.55);
         });
       });
       colAttr.needsUpdate = true;
+    }
+
+    // --- PLANAR CUT CONTROLS & 2-CLICK KNIFE ---
+    function initKnifeVisuals() {
+      const matA = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+      knifeMarkerA = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16), matA);
+      knifeMarkerA.visible = false;
+      scene.add(knifeMarkerA);
+
+      const matB = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+      knifeMarkerB = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16), matB);
+      knifeMarkerB.visible = false;
+      scene.add(knifeMarkerB);
+
+      const lineGeom = new THREE.BufferGeometry();
+      lineGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      knifeLine = new THREE.Line(lineGeom, new THREE.LineBasicMaterial({ color: 0x38bdf8, linewidth: 2 }));
+      knifeLine.visible = false;
+      scene.add(knifeLine);
+    }
+
+    function handleKnifePointClick(pt) {
+      if (!knifePointA || (knifePointA && knifePointB)) {
+        // Point A (Cut start)
+        knifePointA = pt.clone();
+        knifePointB = null;
+        knifeMidpoint = null;
+        knifeNormal = null;
+        knifeOffset = 0.0;
+        knifeMarkerA.position.copy(knifePointA);
+        knifeMarkerA.visible = true;
+        knifeMarkerB.visible = false;
+        knifeLine.visible = false;
+        if (cutPlaneMesh) cutPlaneMesh.visible = false;
+        const statusEl = document.getElementById('knife-status-text');
+        if (statusEl) statusEl.innerHTML = '👆 Point A set! Click on model to set <b>Point B</b> (cut end)';
+        renderPartTints();
+      } else {
+        // Point B (Cut end)
+        knifePointB = pt.clone();
+        knifeMarkerB.position.copy(knifePointB);
+        knifeMarkerB.visible = true;
+
+        // Line connecting A and B
+        const posAttr = knifeLine.geometry.attributes.position;
+        posAttr.setXYZ(0, knifePointA.x, knifePointA.y, knifePointA.z);
+        posAttr.setXYZ(1, knifePointB.x, knifePointB.y, knifePointB.z);
+        posAttr.needsUpdate = true;
+        knifeLine.visible = true;
+
+        // Compute cut plane
+        knifeMidpoint = new THREE.Vector3().addVectors(knifePointA, knifePointB).multiplyScalar(0.5);
+        const knifeVec = new THREE.Vector3().subVectors(knifePointB, knifePointA);
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+
+        knifeNormal = new THREE.Vector3().crossVectors(knifeVec, camDir);
+        if (knifeNormal.lengthSq() < 1e-6) {
+          knifeNormal.crossVectors(knifeVec, camera.up);
+        }
+        knifeNormal.normalize();
+        knifeOffset = 0.0;
+        const slider = document.getElementById('knife-offset-slider');
+        if (slider) slider.value = 0;
+        const lbl = document.getElementById('knife-offset-lbl');
+        if (lbl) lbl.innerText = '0.00 mm';
+
+        updateKnifePlaneMesh();
+        const statusEl = document.getElementById('knife-status-text');
+        if (statusEl) statusEl.innerHTML = '✔ Cut plane placed! Slicing through view.';
+        renderPartTints();
+      }
+    }
+
+    function updateKnifePlaneMesh() {
+      if (!cutPlaneMesh || !knifeMidpoint || !knifeNormal) return;
+      const finalPos = knifeMidpoint.clone().addScaledVector(knifeNormal, knifeOffset);
+      cutPlaneMesh.position.copy(finalPos);
+      const defaultNormal = new THREE.Vector3(0, 0, 1);
+      cutPlaneMesh.quaternion.setFromUnitVectors(defaultNormal, knifeNormal);
+      cutPlaneMesh.visible = (currentSplitMode === 'planar');
+    }
+
+    function flipCutSide() {
+      if (knifeNormal) {
+        knifeNormal.negate();
+        updateKnifePlaneMesh();
+        renderPartTints();
+      }
+    }
+
+    function onKnifeOffsetSlider(val) {
+      knifeOffset = parseFloat(val);
+      const lbl = document.getElementById('knife-offset-lbl');
+      if (lbl) lbl.innerText = `${knifeOffset.toFixed(2)} mm`;
+      updateKnifePlaneMesh();
+      renderPartTints();
+    }
+
+    function resetKnifePoints() {
+      knifePointA = null;
+      knifePointB = null;
+      knifeMidpoint = null;
+      knifeNormal = null;
+      knifeOffset = 0.0;
+      if (knifeMarkerA) knifeMarkerA.visible = false;
+      if (knifeMarkerB) knifeMarkerB.visible = false;
+      if (knifeLine) knifeLine.visible = false;
+      if (cutPlaneMesh && planarSubMode === 'knife') cutPlaneMesh.visible = false;
+      const statusEl = document.getElementById('knife-status-text');
+      if (statusEl) statusEl.innerHTML = '👆 Click on model to set Point A (cut start)';
+      const slider = document.getElementById('knife-offset-slider');
+      if (slider) slider.value = 0;
+      const lbl = document.getElementById('knife-offset-lbl');
+      if (lbl) lbl.innerText = '0.00 mm';
+      renderPartTints();
+    }
+
+    function setPlanarSubMode(mode) {
+      planarSubMode = mode;
+      const btnK = document.getElementById('btn-planar-knife');
+      const btnA = document.getElementById('btn-planar-axis');
+      if (btnK) btnK.classList.toggle('active', mode === 'knife');
+      if (btnA) btnA.classList.toggle('active', mode === 'axis');
+
+      const ctrlK = document.getElementById('planar-knife-controls');
+      const ctrlA = document.getElementById('planar-axis-controls');
+      if (ctrlK) ctrlK.style.display = (mode === 'knife') ? 'block' : 'none';
+      if (ctrlA) ctrlA.style.display = (mode === 'axis') ? 'block' : 'none';
+
+      const tips = document.getElementById('viewport-tips');
+      if (mode === 'knife') {
+        if (tips) tips.innerHTML = 'Left Click: <b>Place Knife Cut Points (A & B)</b> &nbsp;|&nbsp; Drag: Orbit Camera &nbsp;|&nbsp; Scroll: Zoom';
+        if (cutPlaneMesh) cutPlaneMesh.visible = !!(knifeMidpoint && knifeNormal);
+        if (knifeMarkerA) knifeMarkerA.visible = !!knifePointA;
+        if (knifeMarkerB) knifeMarkerB.visible = !!knifePointB;
+        if (knifeLine) knifeLine.visible = !!(knifePointA && knifePointB);
+      } else {
+        if (tips) tips.innerHTML = 'Left Click: Orbit &nbsp;|&nbsp; Right Click: Pan &nbsp;|&nbsp; Scroll: Zoom';
+        if (knifeMarkerA) knifeMarkerA.visible = false;
+        if (knifeMarkerB) knifeMarkerB.visible = false;
+        if (knifeLine) knifeLine.visible = false;
+        setPlanarAxis(currentPlaneAxis);
+        if (cutPlaneMesh) cutPlaneMesh.visible = true;
+      }
+      renderPartTints();
+    }
+
+    function detachCurrentSliceToPart() {
+      if (!primaryMesh || totalFaces === 0) {
+        alert("Please load a 3D model first!");
+        return;
+      }
+
+      let planePos = new THREE.Vector3();
+      let planeNo = new THREE.Vector3();
+
+      if (planarSubMode === 'knife') {
+        if (!knifeMidpoint || !knifeNormal) {
+          alert("Please click 2 points on the model to place a knife plane first!");
+          return;
+        }
+        planePos.copy(knifeMidpoint).addScaledVector(knifeNormal, knifeOffset);
+        planeNo.copy(knifeNormal);
+      } else {
+        if (!boundingBox) return;
+        const center = new THREE.Vector3();
+        boundingBox.getCenter(center);
+        if (currentPlaneAxis === 'X') {
+          planePos.set(currentPlaneCoord, center.y, center.z);
+          planeNo.set(1, 0, 0);
+        } else if (currentPlaneAxis === 'Y') {
+          planePos.set(center.x, currentPlaneCoord, center.z);
+          planeNo.set(0, 1, 0);
+        } else {
+          planePos.set(center.x, center.y, currentPlaneCoord);
+          planeNo.set(0, 0, 1);
+        }
+      }
+
+      // Collect already assigned faces
+      const assigned = new Set();
+      stagedParts.forEach(p => p.faces.forEach(f => assigned.add(f)));
+
+      const sliceFaces = [];
+      const fWorld = new THREE.Vector3();
+      const worldMat = primaryMesh.matrixWorld;
+
+      for (let i = 0; i < totalFaces; i++) {
+        if (assigned.has(i)) continue;
+        fWorld.set(faceCenters[i * 3], faceCenters[i * 3 + 1], faceCenters[i * 3 + 2]);
+        fWorld.applyMatrix4(worldMat);
+        if (fWorld.sub(planePos).dot(planeNo) > 0) {
+          sliceFaces.push(i);
+        }
+      }
+
+      if (sliceFaces.length === 0) {
+        alert("No unassigned faces found on this side of the cut plane!\nTry clicking 'Flip Side' or nudging the cut plane.");
+        return;
+      }
+
+      const partIdx = stagedParts.length;
+      const pal = PART_PALETTE[partIdx % PART_PALETTE.length];
+      const part = {
+        id: Date.now(),
+        name: `Part_${partIdx + 1}`,
+        hex: pal.hex,
+        rgb: pal.rgb,
+        faces: new Set(sliceFaces)
+      };
+      stagedParts.push(part);
+      if (planarSubMode === 'knife') resetKnifePoints();
+      refreshPartsDeckUI();
+      renderPartTints();
+      updateMainButtonLabel();
     }
 
     // --- PLANAR CUT CONTROLS ---
@@ -1337,12 +1692,27 @@
       document.getElementById('tab-split-planar').classList.toggle('active', mode === 'planar');
       document.getElementById('tab-split-lasso').classList.toggle('active', mode === 'lasso');
 
-      document.getElementById('deck-planar').style.display = mode === 'planar' ? 'block' : 'none';
-      document.getElementById('deck-lasso').style.display = mode === 'lasso' ? 'block' : 'none';
+      document.getElementById('deck-planar').style.display = (mode === 'planar') ? 'block' : 'none';
+      document.getElementById('deck-lasso').style.display = (mode === 'lasso') ? 'block' : 'none';
 
-      if (cutPlaneMesh) cutPlaneMesh.visible = (mode === 'planar');
+      const stagedContainer = document.getElementById('staged-parts-container');
+      if (stagedContainer) {
+        stagedContainer.style.display = (mode === 'none') ? 'none' : 'block';
+      }
+
+      if (mode === 'planar') {
+        setPlanarSubMode(planarSubMode);
+      } else {
+        if (cutPlaneMesh) cutPlaneMesh.visible = false;
+        if (knifeMarkerA) knifeMarkerA.visible = false;
+        if (knifeMarkerB) knifeMarkerB.visible = false;
+        if (knifeLine) knifeLine.visible = false;
+      }
+
       if (mode !== 'lasso' && isLassoMode) toggleLassoDraw(false);
 
+      refreshPartsDeckUI();
+      renderPartTints();
       updateMainButtonLabel();
     }
 
@@ -1387,11 +1757,12 @@
       const btn = document.getElementById('btn-export-all');
       if (currentSplitMode === 'none') {
         btn.innerText = '⚡ CONVERT FOR 3D PRINTING';
+      } else if (stagedParts.length > 0) {
+        btn.innerText = `🚀 EXPORT ${stagedParts.length} STAGED PARTS`;
       } else if (currentSplitMode === 'planar') {
         btn.innerText = '✂ SPLIT & EXPORT 2 PARTS';
       } else if (currentSplitMode === 'lasso') {
-        const count = stagedParts.length;
-        btn.innerText = count > 0 ? `🚀 EXPORT ${count} STAGED PARTS` : '🖊 DRAW & STAGE PARTS FIRST';
+        btn.innerText = '🖊 DRAW & STAGE PARTS FIRST';
       }
     }
 
@@ -1478,21 +1849,45 @@
         split_mode: currentSplitMode
       };
 
-      if (currentSplitMode === 'planar') {
-        payload.split_axis = currentPlaneAxis.toLowerCase();
-        payload.split_coord = currentPlaneCoord;
-      } else if (currentSplitMode === 'lasso') {
-        if (stagedParts.length === 0) {
-          alert('Please stage at least one part before exporting!');
-          btn.disabled = false;
-          progressFill.style.width = '0%';
-          statusLbl.innerText = 'Ready';
-          return;
-        }
+      if (stagedParts.length > 0) {
         payload.parts = {};
         stagedParts.forEach(p => {
           payload.parts[p.name] = compressIndicesToRanges(p.faces);
         });
+      } else if (currentSplitMode === 'planar') {
+        const addPegs = document.getElementById('chk-add-pegs') ? document.getElementById('chk-add-pegs').checked : false;
+        payload.add_pegs = addPegs;
+
+        let pPos = new THREE.Vector3();
+        let pNo = new THREE.Vector3();
+        if (planarSubMode === 'knife') {
+          if (!knifeMidpoint || !knifeNormal) {
+            alert("Please click 2 points on the model to place a knife plane before exporting!");
+            btn.disabled = false;
+            progressFill.style.width = '0%';
+            statusLbl.innerText = 'Ready';
+            return;
+          }
+          pPos.copy(knifeMidpoint).addScaledVector(knifeNormal, knifeOffset);
+          pNo.copy(knifeNormal);
+        } else {
+          const center = new THREE.Vector3();
+          if (boundingBox) boundingBox.getCenter(center);
+          if (currentPlaneAxis === 'X') { pPos.set(currentPlaneCoord, center.y, center.z); pNo.set(1, 0, 0); }
+          else if (currentPlaneAxis === 'Y') { pPos.set(center.x, currentPlaneCoord, center.z); pNo.set(0, 1, 0); }
+          else { pPos.set(center.x, center.y, currentPlaneCoord); pNo.set(0, 0, 1); }
+        }
+
+        // Convert Three.js coordinates (Y-up) to Blender coordinates (Z-up):
+        // x_B = x_T, y_B = -z_T, z_B = y_T
+        payload.plane_point = [pPos.x, -pPos.z, pPos.y];
+        payload.plane_normal = [pNo.x, -pNo.z, pNo.y];
+      } else if (currentSplitMode === 'lasso') {
+        alert('Please draw a lasso and stage at least one part before exporting!');
+        btn.disabled = false;
+        progressFill.style.width = '0%';
+        statusLbl.innerText = 'Ready';
+        return;
       }
 
       fetch('/api/convert', {
