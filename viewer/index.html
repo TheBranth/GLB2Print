@@ -529,8 +529,8 @@
               🖊 Draw Selection Lasso (Shift)
             </button>
             <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;">
-              <label class="check-row">
-                <input type="checkbox" id="lasso-front-only" checked> Surface / Front-Facing Only
+              <label class="check-row" title="Cuts through the entire 3D thickness (cookie-cutter style) to produce solid, printable chunks without hollow holes">
+                <input type="checkbox" id="lasso-cut-through" checked> Cut Through Mesh (Volumetric Solid)
               </label>
               <label class="check-row">
                 <input type="checkbox" id="lasso-color-snap" checked> Color-Boundary Snap
@@ -1099,7 +1099,8 @@
         if (py < minY) minY = py; if (py > maxY) maxY = py;
       }
 
-      const frontOnly = document.getElementById('lasso-front-only').checked;
+      const cutThroughEl = document.getElementById('lasso-cut-through');
+      const frontOnly = cutThroughEl ? !cutThroughEl.checked : false;
       const screenPos = new THREE.Vector3();
       const faceWorldNormal = new THREE.Vector3();
       const camPos = camera.position;

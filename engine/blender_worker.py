@@ -129,7 +129,13 @@ def export_object(obj, obj_filepath, mf_filepath):
         for o in bpy.data.objects:
             o.select_set(o == obj)
         bpy.context.view_layer.objects.active = obj
-        bpy.ops.wm.obj_export(filepath=obj_filepath, export_colors=True, export_materials=False, export_selected_objects=True)
+        bpy.ops.wm.obj_export(
+            filepath=obj_filepath,
+            export_colors=True,
+            export_materials=False,
+            export_selected_objects=True,
+            export_triangulated_mesh=True
+        )
         log(f"Exported OBJ: {os.path.basename(obj_filepath)} in {time.time()-t_obj:.2f}s ({os.path.getsize(obj_filepath) / (1024*1024):.2f} MB)")
 
 def bisect_mesh(obj, plane_co, plane_no, clear_outer, clear_inner, cap_cut):
@@ -150,6 +156,10 @@ def bisect_mesh(obj, plane_co, plane_no, clear_outer, clear_inner, cap_cut):
         cut_edges = [e for e in res['geom_cut'] if isinstance(e, bmesh.types.BMEdge)]
         if cut_edges:
             bmesh.ops.edgenet_fill(bm, edges=cut_edges)
+
+    # Always triangulate and recalculate normals so slicers receive pure valid triangles
+    bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
 
     bm.to_mesh(obj.data)
     bm.free()
@@ -307,6 +317,10 @@ def main():
                             bmesh.ops.holes_fill(bm, edges=b_edges2, sides=0)
                     except Exception as h_err:
                         log(f"WARNING: Boundary hole capping skipped for '{safe_name}': {h_err}")
+
+            # ALWAYS triangulate all faces so slicers never encounter N-gons (> 4 vertices)
+            bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
 
             bm.to_mesh(part_obj.data)
             bm.free()
