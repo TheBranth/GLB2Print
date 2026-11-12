@@ -325,6 +325,30 @@
       pointer-events: none;
     }
 
+    /* Empty State Overlay */
+    #empty-state-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 15;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .empty-state-box {
+      pointer-events: auto;
+      background: rgba(22, 23, 29, 0.88);
+      backdrop-filter: blur(12px);
+      border: 1px dashed rgba(56, 189, 248, 0.4);
+      border-radius: 14px;
+      padding: 32px 36px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+    }
+
     #loading-spinner-overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -542,6 +566,19 @@
 
       <div id="drop-overlay">Drop .GLB Model Here to Load</div>
       
+      <div id="empty-state-overlay">
+        <div class="empty-state-box">
+          <div style="font-size: 2.8rem; margin-bottom: 12px;">📦</div>
+          <div style="font-size: 1.15rem; font-weight: 800; color: #ffffff; margin-bottom: 6px;">No 3D Model Loaded</div>
+          <div style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 18px; max-width: 290px; line-height: 1.4;">
+            Drag & drop any <b>.glb</b> or <b>.gltf</b> file directly into this 3D viewport, or click below to browse.
+          </div>
+          <button class="btn-file" style="padding: 9px 20px; font-size: 0.82rem; background: #2563eb; color: #fff; border: none; font-weight: 700; cursor: pointer;" onclick="triggerOpenFileDialog()">
+            📁 Browse 3D Model
+          </button>
+        </div>
+      </div>
+
       <div id="loading-spinner-overlay">
         <div class="spinner"></div>
         <div id="spinner-text" style="font-size: 0.95rem; font-weight: 600;">Loading 3D Model...</div>
@@ -648,8 +685,32 @@
 
       setupEventListeners();
       setupHeartbeat();
-      loadActiveModel();
+      checkModelAndInit();
       animate();
+    }
+
+    function checkModelAndInit() {
+      fetch('/api/model_info')
+        .then(r => r.json())
+        .then(info => {
+          if (info.has_model) {
+            document.getElementById('empty-state-overlay').style.display = 'none';
+            document.getElementById('card-model-name').innerText = info.filename || "Model Ready";
+            loadActiveModel();
+          } else {
+            document.getElementById('loading-spinner-overlay').style.display = 'none';
+            document.getElementById('empty-state-overlay').style.display = 'flex';
+            document.getElementById('card-model-name').innerText = "No Model Loaded";
+            document.getElementById('model-bounds-dim').innerText = "-";
+            document.getElementById('model-poly-count').innerText = "-";
+            document.getElementById('btn-export-all').disabled = true;
+            document.getElementById('btn-export-all').innerText = "📁 OPEN MODEL TO BEGIN";
+          }
+        })
+        .catch(() => {
+          document.getElementById('loading-spinner-overlay').style.display = 'none';
+          document.getElementById('empty-state-overlay').style.display = 'flex';
+        });
     }
 
     function resizeLassoCanvas() {
@@ -732,7 +793,10 @@
         createCutPlane(size, center);
         setPlanarAxis('X');
 
+        document.getElementById('empty-state-overlay').style.display = 'none';
         document.getElementById('loading-spinner-overlay').style.display = 'none';
+        document.getElementById('btn-export-all').disabled = false;
+        updateMainButtonLabel();
       }, undefined, function (err) {
         console.error(err);
         document.getElementById('spinner-text').innerText = 'Ready (No GLB loaded or drop one)';
@@ -852,6 +916,7 @@
         .then(r => r.json())
         .then(res => {
           if (res.success) {
+            document.getElementById('card-model-name').innerText = file.name;
             loadActiveModel();
           } else {
             alert('Upload failed: ' + res.error);

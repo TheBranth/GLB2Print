@@ -23,23 +23,13 @@ from config import load_config, save_config
 class UnifiedAppServer:
     def __init__(self, initial_glb: str = ""):
         self.cfg = load_config()
-        self.glb_path = os.path.abspath(initial_glb) if (initial_glb and os.path.isfile(initial_glb)) else self._discover_initial_glb()
+        self.glb_path = os.path.abspath(initial_glb) if (initial_glb and os.path.isfile(initial_glb)) else ""
         self.viewer_dir = Path(__file__).resolve().parent
         self.port = self._find_free_port()
         self.httpd = None
         self.thread = None
         self.last_heartbeat = time.time()
         self.is_running = True
-
-    def _discover_initial_glb(self):
-        # Look for badger.glb or any .glb in workspace root
-        root = Path(__file__).resolve().parent.parent
-        badger = root / "badger.glb"
-        if badger.is_file():
-            return str(badger)
-        for f in root.glob("*.glb"):
-            return str(f)
-        return ""
 
     def _find_free_port(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -77,6 +67,15 @@ class UnifiedAppServer:
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
                     self.wfile.write(json.dumps(parent_self.cfg).encode("utf-8"))
+                    return
+
+                elif self.path == "/api/model_info":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    has_m = bool(parent_self.glb_path and os.path.isfile(parent_self.glb_path))
+                    fname = os.path.basename(parent_self.glb_path) if has_m else ""
+                    self.wfile.write(json.dumps({"has_model": has_m, "filename": fname}).encode("utf-8"))
                     return
 
                 elif self.path == "/api/model.glb":
