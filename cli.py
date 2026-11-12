@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--split-axis", choices=["none", "x", "y", "z"], default="none", help="Cut plane normal axis (x, y, z)")
     parser.add_argument("--split-coord", type=float, default=0.0, help="Plane position along split axis")
     parser.add_argument("--no-split-cap", action="store_true", help="Do not cap/fill cut holes (keep open)")
+    parser.add_argument("--parts-json", default="", help="Path to JSON file specifying multi-part face index mapping")
     parser.add_argument("--preview", action="store_true", help="Open interactive 3D visual preview & planar cut tool")
 
     return parser.parse_args()
@@ -105,6 +106,7 @@ def main():
             split_axis=args.split_axis,
             split_coord=args.split_coord,
             split_cap=(not args.no_split_cap),
+            parts_json=args.parts_json,
             log_callback=lambda msg: print(f"  > {msg}")
         )
 

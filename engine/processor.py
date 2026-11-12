@@ -24,6 +24,7 @@ class ConversionJob:
                  split_axis: str = "none",
                  split_coord: float = 0.0,
                  split_cap: bool = True,
+                 parts_json: Optional[str] = None,
                  log_callback: Optional[Callable[[str], None]] = None,
                  progress_callback: Optional[Callable[[float, str], None]] = None):
         self.input_glb = os.path.abspath(input_glb)
@@ -38,6 +39,7 @@ class ConversionJob:
         self.split_axis = split_axis.lower()
         self.split_coord = split_coord
         self.split_cap = split_cap
+        self.parts_json = os.path.abspath(parts_json) if parts_json else ""
         self.log_callback = log_callback or (lambda msg: print(msg))
         self.progress_callback = progress_callback or (lambda pct, msg: None)
 
@@ -72,6 +74,9 @@ class ConversionJob:
 
         if not self.split_cap:
             cmd.append("--no-split-cap")
+
+        if self.parts_json:
+            cmd.extend(["--parts-json", self.parts_json])
 
         if self.output_obj:
             cmd.extend(["--output-obj", self.output_obj])
@@ -115,16 +120,18 @@ class ConversionJob:
                         self.progress_callback(0.40, "Baking vertex colors...")
                     elif "Color baking completed" in msg:
                         self.progress_callback(0.55, "Colors baked to vertices.")
+                    elif "Extracting part" in msg:
+                        self.progress_callback(0.70, msg)
                     elif "Decimating mesh" in msg:
-                        self.progress_callback(0.65, "Decimating polygons...")
+                        self.progress_callback(0.75, "Decimating polygons...")
                     elif "Decimation done" in msg:
-                        self.progress_callback(0.75, "Decimation complete.")
+                        self.progress_callback(0.80, "Decimation complete.")
                     elif "PLANAR CUT" in msg:
                         self.progress_callback(0.80, "Bisecting model along plane...")
-                    elif "Building 3MF" in msg or "Exporting Part 1" in msg:
+                    elif "Building 3MF" in msg or "Exporting Part" in msg:
                         self.progress_callback(0.88, "Packaging parts...")
-                    elif "Exporting vertex-colored OBJ" in msg:
-                        self.progress_callback(0.92, "Writing OBJ...")
+                    elif "Exported OBJ" in msg or "Exported 3MF" in msg:
+                        self.progress_callback(0.95, "Writing 3D print files...")
                     elif "ALL DONE" in msg:
                         self.progress_callback(1.0, "Conversion complete!")
                 elif "Error" in line_str or "Traceback" in line_str:

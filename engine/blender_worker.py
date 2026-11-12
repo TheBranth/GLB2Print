@@ -1,10 +1,12 @@
 """
-blender_worker.py - Headless Blender script for GLB to 3D-Print conversion & Smart Splitting.
+blender_worker.py - Headless Blender script for GLB to 3D-Print conversion,
+Smart Splitting & Multi-Part Region/Lasso Extraction.
 Executes inside Blender (Windows, macOS, Linux).
 """
 
 import sys
 import os
+import json
 import argparse
 import time
 import zipfile
@@ -38,6 +40,9 @@ def parse_args():
     parser.add_argument("--split-cap", action="store_true", default=True, help="Cap cut surfaces for watertight printing")
     parser.add_argument("--no-split-cap", dest="split_cap", action="store_false", help="Do not cap cut surfaces")
 
+    # Multi-Part Lasso / Region Extraction
+    parser.add_argument("--parts-json", default="", help="Path to JSON file containing part names and face indices")
+
     return parser.parse_args(app_args)
 
 def export_3mf(filepath, mesh, loop_colors):
@@ -59,7 +64,6 @@ def export_3mf(filepath, mesh, loop_colors):
     tri_v1 = loop_verts[poly_loop_starts + 1]
     tri_v2 = loop_verts[poly_loop_starts + 2]
 
-    # Calculate triangle color from 3 loop corners
     c0 = loop_colors[poly_loop_starts, :3]
     c1 = loop_colors[poly_loop_starts + 1, :3]
     c2 = loop_colors[poly_loop_starts + 2, :3]
@@ -108,7 +112,6 @@ def export_3mf(filepath, mesh, loop_colors):
 def export_object(obj, obj_filepath, mf_filepath):
     """Exports a specific Blender mesh object to OBJ and/or 3MF."""
     mesh = obj.data
-    # Active loop colors
     num_loops = len(mesh.loops)
     color_layer = mesh.color_attributes.active
     if color_layer:
@@ -227,22 +230,7 @@ def main():
     else:
         log("No image texture found; skipping texture color baking.")
 
-    # 5. Decimation
-    init_polys = len(mesh.polygons)
-    target_ratio = args.decimate_ratio
-    if args.target_triangles > 0 and init_polys > args.target_triangles:
-        target_ratio = args.target_triangles / float(init_polys)
-
-    if target_ratio < 0.999:
-        log(f"Decimating mesh (ratio: {target_ratio:.3f}, target ~{int(init_polys * target_ratio)} faces)...")
-        t_dec = time.time()
-        mod = obj.modifiers.new(name='Decimate', type='DECIMATE')
-        mod.ratio = float(target_ratio)
-        bpy.ops.object.modifier_apply(modifier='Decimate')
-        mesh = obj.data
-        log(f"Decimation done in {time.time()-t_dec:.2f}s. New verts: {len(mesh.vertices)}, faces: {len(mesh.polygons)}")
-
-    # 6. Scaling (mm) and Grounding
+    # 5. Handle Scaling (mm) and Grounding
     verts_co = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
     mesh.vertices.foreach_get('co', verts_co)
     verts_mat = verts_co.reshape((-1, 3))
@@ -266,8 +254,61 @@ def main():
         for v in mesh.vertices:
             v.co.z += z_offset
 
-    # 7. Check if Planar Cut / Smart Splitting is requested
-    if args.split_axis != "none":
+    def split_path(base_path, suffix):
+        if not base_path:
+            return ""
+        d, f = os.path.split(base_path)
+        stem, ext = os.path.splitext(f)
+        return os.path.join(d, f"{stem}_{suffix}{ext}")
+
+    # 6. Check if Multi-Part Lasso / Region Split is requested
+    if args.parts_json and os.path.isfile(args.parts_json):
+        log(f"MULTI-PART SPLIT: Processing parts from {args.parts_json}...")
+        with open(args.parts_json, "r", encoding="utf-8") as pf:
+            parts_dict = json.load(pf)
+
+        log(f"Found {len(parts_dict)} staged parts to export.")
+
+        for part_name, face_indices in parts_dict.items():
+            safe_name = part_name.strip().replace(" ", "_")
+            log(f"Extracting part '{safe_name}' ({len(face_indices)} faces)...")
+
+            part_obj = obj.copy()
+            part_obj.data = obj.data.copy()
+            bpy.context.collection.objects.link(part_obj)
+
+            bm = bmesh.new()
+            bm.from_mesh(part_obj.data)
+            keep_set = set(face_indices)
+            del_faces = [f for f in bm.faces if f.index not in keep_set]
+            bmesh.ops.delete(bm, geom=del_faces, context='FACES')
+
+            # Cap boundaries if requested
+            if args.split_cap:
+                b_edges = [e for e in bm.edges if e.is_boundary]
+                if b_edges:
+                    bmesh.ops.edgenet_fill(bm, edges=b_edges)
+
+            bm.to_mesh(part_obj.data)
+            bm.free()
+
+            # Optional decimation on the extracted part
+            if args.decimate_ratio < 0.999 or (args.target_triangles > 0 and len(part_obj.data.polygons) > args.target_triangles):
+                ratio = args.decimate_ratio
+                if args.target_triangles > 0 and len(part_obj.data.polygons) > args.target_triangles:
+                    ratio = args.target_triangles / float(len(part_obj.data.polygons))
+                mod = part_obj.modifiers.new(name='Decimate', type='DECIMATE')
+                mod.ratio = float(ratio)
+                bpy.context.view_layer.objects.active = part_obj
+                bpy.ops.object.modifier_apply(modifier='Decimate')
+
+            part_obj_out = split_path(args.output_obj, safe_name)
+            part_3mf_out = split_path(args.output_3mf, safe_name)
+
+            export_object(part_obj, part_obj_out, part_3mf_out)
+
+    # 7. Check if Planar Cut is requested
+    elif args.split_axis != "none":
         axis = args.split_axis.lower()
         coord = args.split_coord
         log(f"PLANAR CUT: Splitting model along {axis.upper()} axis at coordinate {coord:.3f} (Cap: {args.split_cap})...")
@@ -286,7 +327,6 @@ def main():
         plane_no = plane_normals[axis]
         plane_co = plane_coords[axis]
 
-        # Duplicate into Part 1 and Part 2
         part1 = obj
         part1.name = "Part_1"
 
@@ -295,21 +335,8 @@ def main():
         part2.name = "Part_2"
         bpy.context.collection.objects.link(part2)
 
-        # Part 1: Negative side
         bisect_mesh(part1, plane_co, plane_no, clear_outer=True, clear_inner=False, cap_cut=args.split_cap)
-        # Part 2: Positive side
         bisect_mesh(part2, plane_co, plane_no, clear_outer=False, clear_inner=True, cap_cut=args.split_cap)
-
-        log(f"Part 1 ready: {len(part1.data.vertices)} verts, {len(part1.data.polygons)} faces")
-        log(f"Part 2 ready: {len(part2.data.vertices)} verts, {len(part2.data.polygons)} faces")
-
-        # Determine output filenames
-        def split_path(base_path, suffix):
-            if not base_path:
-                return ""
-            d, f = os.path.split(base_path)
-            stem, ext = os.path.splitext(f)
-            return os.path.join(d, f"{stem}_{suffix}{ext}")
 
         p1_obj = split_path(args.output_obj, "part1")
         p2_obj = split_path(args.output_obj, "part2")
@@ -322,7 +349,20 @@ def main():
         export_object(part2, p2_obj, p2_3mf)
 
     else:
-        # Standard Single-Model Export
+        # Standard Single-Model Decimation & Export
+        init_polys = len(mesh.polygons)
+        target_ratio = args.decimate_ratio
+        if args.target_triangles > 0 and init_polys > args.target_triangles:
+            target_ratio = args.target_triangles / float(init_polys)
+
+        if target_ratio < 0.999:
+            log(f"Decimating mesh (ratio: {target_ratio:.3f}, target ~{int(init_polys * target_ratio)} faces)...")
+            t_dec = time.time()
+            mod = obj.modifiers.new(name='Decimate', type='DECIMATE')
+            mod.ratio = float(target_ratio)
+            bpy.ops.object.modifier_apply(modifier='Decimate')
+            log(f"Decimation done in {time.time()-t_dec:.2f}s. New verts: {len(mesh.vertices)}, faces: {len(mesh.polygons)}")
+
         export_object(obj, args.output_obj, args.output_3mf)
 
     log(f"ALL DONE! Total processing time: {time.time()-t_start:.2f}s")
