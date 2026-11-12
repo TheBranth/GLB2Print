@@ -1,7 +1,7 @@
 """
 app_gui.py - Modern Cross-Platform Desktop GUI for GLB2Print.
 Runs natively on Windows, macOS, and Linux using Python's built-in Tkinter/TTK.
-Zero extra dependencies required.
+Includes 3D visual representation and interactive Planar Cut tools.
 """
 
 import sys
@@ -15,13 +15,14 @@ from tkinter import ttk, filedialog, messagebox
 
 from config import load_config, save_config, find_blender_binary
 from engine.processor import ConversionJob
+from viewer.server import launch_viewer
 
 class GLB2PrintApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("GLB2Print - Universal 3D-Printing Prep")
-        self.geometry("720x780")
-        self.minsize(640, 700)
+        self.title("GLB2Print - Universal 3D-Printing Prep & Smart Split")
+        self.geometry("740x820")
+        self.minsize(660, 720)
 
         self.cfg = load_config()
 
@@ -42,6 +43,12 @@ class GLB2PrintApp(tk.Tk):
         self.decimate_triangles_var = tk.IntVar(value=self.cfg.get("default_triangles", 250000))
         self.decimate_enable_var = tk.BooleanVar(value=True)
 
+        # Smart Splitting / Planar Cut
+        self.split_enable_var = tk.BooleanVar(value=False)
+        self.split_axis_var = tk.StringVar(value="X")
+        self.split_coord_var = tk.StringVar(value="0.0")
+        self.split_cap_var = tk.BooleanVar(value=True)
+
         self.blender_path_var = tk.StringVar(value=self.cfg.get("blender_path", ""))
 
         self.is_converting = False
@@ -52,11 +59,9 @@ class GLB2PrintApp(tk.Tk):
 
     def _configure_styles(self):
         self.style = ttk.Style(self)
-        # Use clean theme
         if "clam" in self.style.theme_names():
             self.style.theme_use("clam")
 
-        # Color palette
         bg_main = "#f8f9fa"
         self.configure(bg=bg_main)
 
@@ -70,16 +75,19 @@ class GLB2PrintApp(tk.Tk):
         self.style.configure("Primary.TButton", font=("Segoe UI", 11, "bold"), foreground="#ffffff", background="#2563eb", borderwidth=0)
         self.style.map("Primary.TButton", background=[("active", "#1d4ed8"), ("disabled", "#94a3b8")])
 
+        self.style.configure("Visual.TButton", font=("Segoe UI", 9, "bold"), foreground="#ffffff", background="#059669", borderwidth=0)
+        self.style.map("Visual.TButton", background=[("active", "#047857"), ("disabled", "#94a3b8")])
+
         self.style.configure("Secondary.TButton", font=("Segoe UI", 9), background="#e2e8f0", foreground="#1e293b")
         self.style.map("Secondary.TButton", background=[("active", "#cbd5e1")])
 
     def _build_ui(self):
-        main_frame = ttk.Frame(self, padding="16")
+        main_frame = ttk.Frame(self, padding="14")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # 1. Header with Settings Gear
         header_row = ttk.Frame(main_frame)
-        header_row.pack(fill=tk.X, pady=(0, 12))
+        header_row.pack(fill=tk.X, pady=(0, 10))
 
         header_text_frame = ttk.Frame(header_row)
         header_text_frame.pack(side=tk.LEFT, fill=tk.Y)
@@ -87,7 +95,7 @@ class GLB2PrintApp(tk.Tk):
         title_lbl = ttk.Label(header_text_frame, text="GLB2Print", style="Header.TLabel")
         title_lbl.pack(anchor="w")
 
-        subtitle_lbl = ttk.Label(header_text_frame, text="Turn AI & game GLB models into 3D-printing ready OBJ & 3MF files with baked vertex colors", style="SubHeader.TLabel")
+        subtitle_lbl = ttk.Label(header_text_frame, text="Universal 3D-Printing Preparation, Vertex Color Baking & Smart Planar Splitting", style="SubHeader.TLabel")
         subtitle_lbl.pack(anchor="w")
 
         settings_btn = ttk.Button(header_row, text="⚙ Settings", style="Secondary.TButton", command=self._open_settings_dialog)
@@ -96,7 +104,7 @@ class GLB2PrintApp(tk.Tk):
         # 2. File Selection Card
         file_card = self._create_card(main_frame, "1. Select Model (.glb / .gltf)")
         file_row = ttk.Frame(file_card, style="Card.TFrame")
-        file_row.pack(fill=tk.X, padx=12, pady=(0, 8))
+        file_row.pack(fill=tk.X, padx=12, pady=(0, 6))
 
         self.file_path_entry = ttk.Entry(file_row, font=("Segoe UI", 9))
         self.file_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
@@ -107,31 +115,35 @@ class GLB2PrintApp(tk.Tk):
         browse_batch_btn = ttk.Button(file_row, text="Batch Folder", style="Secondary.TButton", command=self._browse_folder)
         browse_batch_btn.pack(side=tk.LEFT)
 
-        self.file_status_lbl = ttk.Label(file_card, text="No model selected (Drop or browse a .glb)", style="Desc.TLabel")
-        self.file_status_lbl.pack(anchor="w", padx=12, pady=(0, 10))
+        status_row = ttk.Frame(file_card, style="Card.TFrame")
+        status_row.pack(fill=tk.X, padx=12, pady=(0, 6))
 
-        # 3. Texture Resizing Card (User Request!)
+        self.file_status_lbl = ttk.Label(status_row, text="No model selected (Drop or browse a .glb)", style="Desc.TLabel")
+        self.file_status_lbl.pack(side=tk.LEFT, anchor="w")
+
+        # 3D Visual Preview & Cut Button
+        self.preview_btn = ttk.Button(status_row, text="👁 3D Visual Preview & Cut Tool", style="Visual.TButton", command=self._open_visual_viewer)
+        self.preview_btn.pack(side=tk.RIGHT)
+
+        # 3. Texture Resizing Card
         tex_card = self._create_card(main_frame, "2. Texture Resolution Before Baking")
         tex_desc = ttk.Label(tex_card, text="Resize large 4K textures prior to vertex color baking to drastically speed up processing and lower RAM.", style="Desc.TLabel")
-        tex_desc.pack(anchor="w", padx=12, pady=(0, 8))
+        tex_desc.pack(anchor="w", padx=12, pady=(0, 6))
 
         tex_row = ttk.Frame(tex_card, style="Card.TFrame")
-        tex_row.pack(fill=tk.X, padx=12, pady=(0, 10))
+        tex_row.pack(fill=tk.X, padx=12, pady=(0, 8))
 
         ttk.Label(tex_row, text="Max Texture Dimension:", background="#ffffff", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 8))
 
         for opt in self.texture_res_options:
-            val_text = f"{opt}px" if opt != "Original" else "Original (No resize)"
+            val_text = f"{opt}px" if opt != "Original" else "Original"
             rb = ttk.Radiobutton(tex_row, text=val_text, variable=self.texture_res_var, value=opt)
             rb.pack(side=tk.LEFT, padx=6)
 
         # 4. Mesh Decimation Card
         dec_card = self._create_card(main_frame, "3. Polygon Decimation (Slicer Optimization)")
-        dec_desc = ttk.Label(dec_card, text="AI GLB models often contain millions of micro-polygons. Decimating optimizes slicing speed and keeps colors sharp.", style="Desc.TLabel")
-        dec_desc.pack(anchor="w", padx=12, pady=(0, 8))
-
         dec_row = ttk.Frame(dec_card, style="Card.TFrame")
-        dec_row.pack(fill=tk.X, padx=12, pady=(0, 6))
+        dec_row.pack(fill=tk.X, padx=12, pady=(0, 4))
 
         self.dec_chk = ttk.Checkbutton(dec_row, text="Enable Smart Decimation", variable=self.decimate_enable_var, command=self._toggle_decimate)
         self.dec_chk.pack(side=tk.LEFT, padx=(0, 12))
@@ -139,52 +151,74 @@ class GLB2PrintApp(tk.Tk):
         self.triangles_scale = ttk.Scale(dec_row, from_=50000, to=1000000, variable=self.decimate_triangles_var, command=self._on_triangles_slider)
         self.triangles_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
 
-        self.triangles_lbl = ttk.Label(dec_row, text=f"{self.decimate_triangles_var.get():,} faces", background="#ffffff", font=("Segoe UI", 9, "bold"), width=14)
+        self.triangles_lbl = ttk.Label(dec_row, text=f"{self.decimate_triangles_var.get():,} faces", background="#ffffff", font=("Segoe UI", 9, "bold"), width=13)
         self.triangles_lbl.pack(side=tk.LEFT, padx=(4, 0))
 
         preset_row = ttk.Frame(dec_card, style="Card.TFrame")
-        preset_row.pack(anchor="w", padx=12, pady=(0, 10))
+        preset_row.pack(anchor="w", padx=12, pady=(0, 8))
         ttk.Label(preset_row, text="Presets:", background="#ffffff", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(preset_row, text="100k (Fast Slicing)", style="Secondary.TButton", command=lambda: self._set_triangles(100000)).pack(side=tk.LEFT, padx=3)
         ttk.Button(preset_row, text="250k (Balanced Sweetspot)", style="Secondary.TButton", command=lambda: self._set_triangles(250000)).pack(side=tk.LEFT, padx=3)
         ttk.Button(preset_row, text="500k (High Detail)", style="Secondary.TButton", command=lambda: self._set_triangles(500000)).pack(side=tk.LEFT, padx=3)
 
-        # 5. Print Bed Prep & Output Formats
-        opt_card = self._create_card(main_frame, "4. 3D Print Preparation & Export Formats")
+        # 5. Smart Splitting / Planar Cut Card (New Feature!)
+        split_card = self._create_card(main_frame, "4. Smart Splitting (Planar Cut)")
+        split_desc = ttk.Label(split_card, text="Split large models into manageable chunks (e.g. cut mask across nose). Use the 3D Viewer or set cut plane below.", style="Desc.TLabel")
+        split_desc.pack(anchor="w", padx=12, pady=(0, 6))
+
+        split_row = ttk.Frame(split_card, style="Card.TFrame")
+        split_row.pack(fill=tk.X, padx=12, pady=(0, 8))
+
+        self.split_chk = ttk.Checkbutton(split_row, text="Enable Planar Cut (Split in 2 Parts)", variable=self.split_enable_var, command=self._toggle_split)
+        self.split_chk.pack(side=tk.LEFT, padx=(0, 16))
+
+        ttk.Label(split_row, text="Cut Axis:", background="#ffffff").pack(side=tk.LEFT, padx=(0, 4))
+        self.split_axis_combo = ttk.Combobox(split_row, textvariable=self.split_axis_var, values=["X", "Y", "Z"], width=4, state="readonly")
+        self.split_axis_combo.pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(split_row, text="Coordinate:", background="#ffffff").pack(side=tk.LEFT, padx=(0, 4))
+        self.split_coord_entry = ttk.Entry(split_row, textvariable=self.split_coord_var, width=8)
+        self.split_coord_entry.pack(side=tk.LEFT, padx=(0, 12))
+
+        self.split_cap_chk = ttk.Checkbutton(split_row, text="Cap Cut (Watertight)", variable=self.split_cap_var)
+        self.split_cap_chk.pack(side=tk.LEFT)
+
+        self._toggle_split()
+
+        # 6. Print Bed Prep & Formats
+        opt_card = self._create_card(main_frame, "5. Print Bed & Export Formats")
         opt_row = ttk.Frame(opt_card, style="Card.TFrame")
-        opt_row.pack(fill=tk.X, padx=12, pady=(0, 8))
+        opt_row.pack(fill=tk.X, padx=12, pady=(0, 6))
 
-        ttk.Checkbutton(opt_row, text="Auto-ground to print bed (Z = 0)", variable=self.ground_z_var).pack(side=tk.LEFT, padx=(0, 16))
-
-        ttk.Label(opt_row, text="Target Height (mm, 0=original):", background="#ffffff").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Checkbutton(opt_row, text="Auto-ground to bed (Z = 0)", variable=self.ground_z_var).pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Label(opt_row, text="Height (mm, 0=original):", background="#ffffff").pack(side=tk.LEFT, padx=(0, 4))
         self.height_entry = ttk.Entry(opt_row, textvariable=self.height_mm_var, width=8)
         self.height_entry.pack(side=tk.LEFT)
 
         fmt_row = ttk.Frame(opt_card, style="Card.TFrame")
-        fmt_row.pack(fill=tk.X, padx=12, pady=(0, 10))
-
+        fmt_row.pack(fill=tk.X, padx=12, pady=(0, 6))
         ttk.Label(fmt_row, text="Export Formats:", background="#ffffff", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Checkbutton(fmt_row, text="OBJ (.obj with vertex colors)", variable=self.export_obj_var).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Checkbutton(fmt_row, text="3MF (.3mf with color groups)", variable=self.export_3mf_var).pack(side=tk.LEFT)
+        ttk.Checkbutton(fmt_row, text="OBJ (vertex colors)", variable=self.export_obj_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(fmt_row, text="3MF (color groups)", variable=self.export_3mf_var).pack(side=tk.LEFT)
 
-        # 6. Action Button & Progress
+        # 7. Action Button & Progress
         action_row = ttk.Frame(main_frame)
-        action_row.pack(fill=tk.X, pady=(12, 6))
+        action_row.pack(fill=tk.X, pady=(10, 4))
 
         self.convert_btn = ttk.Button(action_row, text="⚡ CONVERT FOR 3D PRINTING", style="Primary.TButton", command=self._start_conversion)
-        self.convert_btn.pack(fill=tk.X, ipady=6)
+        self.convert_btn.pack(fill=tk.X, ipady=5)
 
         self.progress_bar = ttk.Progressbar(main_frame, mode="determinate")
-        self.progress_bar.pack(fill=tk.X, pady=(6, 4))
+        self.progress_bar.pack(fill=tk.X, pady=(4, 2))
 
         self.status_lbl = ttk.Label(main_frame, text="Ready", style="SubHeader.TLabel")
         self.status_lbl.pack(anchor="w")
 
-        # 7. Log output area
+        # 8. Log output area
         log_frame = ttk.Frame(main_frame)
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
-        self.log_text = tk.Text(log_frame, height=6, bg="#ffffff", fg="#334155", font=("Consolas", 8), relief="solid", bd=1)
+        self.log_text = tk.Text(log_frame, height=5, bg="#ffffff", fg="#334155", font=("Consolas", 8), relief="solid", bd=1)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
@@ -192,11 +226,17 @@ class GLB2PrintApp(tk.Tk):
         self.log_text.config(yscrollcommand=scrollbar.set)
 
     def _create_card(self, parent, title):
-        card = ttk.Frame(parent, style="Card.TFrame", padding="8", relief="solid", borderwidth=1)
-        card.pack(fill=tk.X, pady=(0, 10))
+        card = ttk.Frame(parent, style="Card.TFrame", padding="6", relief="solid", borderwidth=1)
+        card.pack(fill=tk.X, pady=(0, 8))
         lbl = ttk.Label(card, text=title, style="CardTitle.TLabel")
-        lbl.pack(anchor="w", padx=12, pady=(4, 6))
+        lbl.pack(anchor="w", padx=12, pady=(2, 4))
         return card
+
+    def _toggle_split(self):
+        st = tk.NORMAL if self.split_enable_var.get() else tk.DISABLED
+        self.split_axis_combo.config(state="readonly" if self.split_enable_var.get() else tk.DISABLED)
+        self.split_coord_entry.config(state=st)
+        self.split_cap_chk.config(state=st)
 
     def _on_triangles_slider(self, val):
         count = int(float(val))
@@ -237,6 +277,18 @@ class GLB2PrintApp(tk.Tk):
             self.file_path_entry.insert(0, f"[Batch Folder] {folder} ({len(glbs)} files)")
             self.file_status_lbl.config(text=f"Batch queue: {len(glbs)} models ready for conversion.")
 
+    def _open_visual_viewer(self):
+        # Determine file
+        entry_text = self.file_path_entry.get().strip()
+        target = self.input_files[0] if self.input_files else (entry_text if os.path.isfile(entry_text) else "")
+        if not target or not os.path.isfile(target):
+            messagebox.showwarning("No File", "Please select a valid .glb file first to view.")
+            return
+
+        self._log(f"Opening 3D Visual Viewer for: {os.path.basename(target)}")
+        t = threading.Thread(target=lambda: launch_viewer(target, self.cfg), daemon=True)
+        t.start()
+
     def _check_blender_health(self):
         b_path = self.blender_path_var.get()
         if not b_path or not os.path.isfile(b_path):
@@ -275,15 +327,12 @@ class GLB2PrintApp(tk.Tk):
                 self.blender_path_var.set(found)
                 messagebox.showinfo("Auto-Detect", f"Found Blender at:\n{found}")
             else:
-                messagebox.showwarning("Auto-Detect", "Could not locate Blender automatically. Please browse manually.")
+                messagebox.showwarning("Auto-Detect", "Could not locate Blender automatically.")
 
         ttk.Button(b_row, text="Browse...", command=browse_blender).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(b_row, text="Auto-Detect", command=auto_detect_blender).pack(side=tk.LEFT)
 
-        # Slicer path configuration (Optional)
         ttk.Label(pad, text="Preferred Slicer Executable (Optional):", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(6, 4))
-        ttk.Label(pad, text="e.g. Snapmaker Orca, Bambu Studio, or PrusaSlicer (leave blank if not needed).", foreground="#64748b", font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 6))
-
         s_row = ttk.Frame(pad)
         s_row.pack(fill=tk.X, pady=(0, 16))
 
@@ -315,7 +364,6 @@ class GLB2PrintApp(tk.Tk):
         if self.is_converting:
             return
 
-        # Read manual entry if input_files is empty
         entry_text = self.file_path_entry.get().strip()
         if not self.input_files and entry_text and os.path.isfile(entry_text):
             self.input_files = [entry_text]
@@ -333,7 +381,6 @@ class GLB2PrintApp(tk.Tk):
             messagebox.showerror("Blender Missing", "Blender executable path is missing or invalid. Please check Settings.")
             return
 
-        # Start thread
         self.is_converting = True
         self.convert_btn.config(state=tk.DISABLED)
         self.progress_bar["value"] = 0
@@ -350,6 +397,15 @@ class GLB2PrintApp(tk.Tk):
         target_triangles = self.decimate_triangles_var.get() if self.decimate_enable_var.get() else 0
         ground_z = self.ground_z_var.get()
 
+        # Split settings
+        do_split = self.split_enable_var.get()
+        split_axis = self.split_axis_var.get().lower() if do_split else "none"
+        try:
+            split_coord = float(self.split_coord_var.get())
+        except ValueError:
+            split_coord = 0.0
+        split_cap = self.split_cap_var.get()
+
         try:
             h_mm = float(self.height_mm_var.get())
         except ValueError:
@@ -364,8 +420,8 @@ class GLB2PrintApp(tk.Tk):
             last_out_dir = out_dir
             stem = p.stem
 
-            out_obj = str(out_dir / f"{stem}_print.obj") if self.export_obj_var.get() else None
-            out_3mf = str(out_dir / f"{stem}_print.3mf") if self.export_3mf_var.get() else None
+            out_obj = str(out_dir / f"{stem}.obj") if self.export_obj_var.get() else None
+            out_3mf = str(out_dir / f"{stem}.3mf") if self.export_3mf_var.get() else None
 
             self.after(0, lambda f=p.name, i=idx, t=total_files: self.status_lbl.config(text=f"Processing [{i}/{t}]: {f}"))
             self.after(0, lambda f=p.name: self._log(f"\n--- Starting: {f} ---"))
@@ -374,7 +430,6 @@ class GLB2PrintApp(tk.Tk):
                 self.after(0, lambda m=msg: self._log(m))
 
             def prog_cb(pct, text):
-                # Scale progress across all files
                 overall = ((idx - 1) / total_files) + (pct / total_files)
                 self.after(0, lambda o=overall, t=text: self._update_progress(o, t))
 
@@ -387,6 +442,9 @@ class GLB2PrintApp(tk.Tk):
                 target_triangles=target_triangles,
                 ground_z=ground_z,
                 height_mm=h_mm,
+                split_axis=split_axis,
+                split_coord=split_coord,
+                split_cap=split_cap,
                 log_callback=log_cb,
                 progress_callback=prog_cb
             )

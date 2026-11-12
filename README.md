@@ -1,6 +1,6 @@
 # GLB2Print — Universal 3D-Printing Preparation Tool
 
-A fast, cross-platform standalone tool and GUI that converts textured `.glb` / `.gltf` 3D models (such as AI-generated models from Tripo, Meshy, Rodin, or game assets) directly into **3D-printing ready** `.3mf` and `.obj` files with baked vertex colors.
+A fast, cross-platform standalone tool and GUI that converts textured `.glb` / `.gltf` 3D models (such as AI-generated models from Tripo, Meshy, Rodin, or game assets) directly into **3D-printing ready** `.3mf` and `.obj` files with baked vertex colors and **smart planar splitting**.
 
 **Compatible with any slicer**: OrcaSlicer, Bambu Studio, PrusaSlicer, Creality Print, Cura, Snapmaker Orca, etc.
 
@@ -23,13 +23,15 @@ Before using GLB2Print, ensure you have the following installed:
 
 ---
 
-## Why Use GLB2Print?
+## Key Features
 
-* **No More Manual Blender Baking**: Slicers cannot use UV-mapped 2D texture images for multi-color toolpaths. Normally, you have to manually open Blender, configure materials, bake texture maps to vertex colors, decimate, align to the print bed, and export. **GLB2Print automates this entire process headlessly in seconds.**
+* **3D Visual Representation**: Built-in 3D viewer (powered by Three.js & OrbitControls) to visually inspect loaded GLB models, full-color textures, dimensions, and polygon counts.
+* **Smart Splitting (Planar Cut)**: Break large, oversized models (such as full-size helmets, masks, or statues) into manageable printable pieces. Position the cutting plane along the X, Y, or Z axis in real time with automatic hole capping for watertight manifold solids.
+* **No More Manual Blender Baking**: Slicers cannot use UV-mapped 2D texture images for multi-color toolpaths. **GLB2Print automates this entire process headlessly in seconds.**
 * **Texture Resizing Before Baking**: Downscale massive 4K textures (e.g. to 1024×1024 or 512×512) prior to sampling to dramatically speed up conversion and reduce memory overhead without any loss in FDM print quality.
 * **Smart Polygon Decimation**: AI models typically come with 1–3 million micro-polygons. GLB2Print includes a quadric decimation engine that preserves silhouette edges and vertex colors while shrinking files from ~200MB down to ~3MB–25MB for lightning-fast slicing.
 * **Auto-Ground to Print Bed**: Automatically computes the model's bounding box and shifts the lowest vertex to $Z = 0.0$ so the model sits flat on your build plate.
-* **Cross-Platform**: Runs natively on **Windows**, **macOS**, and **Linux** with zero extra UI dependencies (uses Python's built-in Tkinter).
+* **Cross-Platform**: Runs natively on **Windows**, **macOS**, and **Linux**.
 
 ---
 
@@ -39,13 +41,17 @@ Before using GLB2Print, ensure you have the following installed:
 * **Windows**: Double-click `run_gui.bat` (or run `python app_gui.py`).
 * **macOS / Linux**: Double-click `run_gui.sh` (or run `python3 app_gui.py`).
 
-### 2. Steps to Convert
+### 2. Steps to Convert & Split
 1. **Select Model**: Click **Browse File** (or **Batch Folder** to convert an entire directory).
-2. **Texture Resolution**: Choose your maximum texture sampling dimension (`Original`, `2048px`, `1024px`, or `512px`).
-3. **Polygon Decimation**: Pick a preset (`100k Fast Slicing`, `250k Balanced Sweetspot`, `500k High Detail`) or adjust the slider.
-4. **Print Bed Prep**: Check `Auto-ground to print bed (Z = 0)`.
-5. **Export Formats**: Check `OBJ` (vertex colors) and/or `3MF` (color groups).
-6. Click **⚡ CONVERT FOR 3D PRINTING**.
+2. **3D Visual Preview & Cut**: Click **👁 3D Visual Preview & Cut Tool** to launch the interactive 3D viewport.
+   * Rotate, zoom, and inspect dimensions.
+   * Select cut axis (`X`, `Y`, or `Z`) and drag the slider to place the cutting plane (e.g. right through the nose or waist).
+   * Click **✂ Split & Export Parts** to produce watertight `_part1` and `_part2` files.
+3. **Texture Resolution**: Choose your maximum texture sampling dimension (`Original`, `2048px`, `1024px`, or `512px`).
+4. **Polygon Decimation**: Pick a preset (`100k Fast Slicing`, `250k Balanced Sweetspot`, `500k High Detail`) or adjust the slider.
+5. **Print Bed Prep**: Check `Auto-ground to print bed (Z = 0)`.
+6. **Export Formats**: Check `OBJ` (vertex colors) and/or `3MF` (color groups).
+7. Click **⚡ CONVERT FOR 3D PRINTING**.
 
 ---
 
@@ -56,6 +62,12 @@ GLB2Print includes a full-featured CLI (`cli.py`) for automated terminal workflo
 ### Usage Examples
 
 ```bash
+# Open interactive 3D visual preview and cut tool
+python cli.py badger.glb --preview
+
+# Split model across the X axis at coordinate 0.0 with capped cut faces
+python cli.py badger.glb --split-axis x --split-coord 0.0 -t 200000 -f both
+
 # Convert a single GLB to both OBJ and 3MF with 250k faces and 1024px texture
 python cli.py badger.glb -t 250000 -r 1024 -f both
 
@@ -77,6 +89,10 @@ python cli.py model.glb --blender-path "D:/Blender/blender.exe" --set-blender-de
 | Flag | Long Flag | Value / Type | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `inputs` | *(positional)* | `path/glob` | *(required)* | One or more `.glb` / `.gltf` files, or a wildcard pattern (e.g. `*.glb`). |
+| | `--preview` | `flag` | `False` | Opens the **interactive 3D visual preview** and planar cut viewport. |
+| | `--split-axis` | `none`, `x`, `y`, `z` | `none` | **Cut plane normal axis** for splitting model into 2 parts. |
+| | `--split-coord` | `float` | `0.0` | Coordinate position along the split axis. |
+| | `--no-split-cap` | `flag` | `False` | Disables hole capping (leaves cut surfaces open). By default, cuts are sealed watertight. |
 | `-t` | `--triangles` | `integer` | `250000` | **Target polygon/triangle count**. Decimates mesh while preserving vertex colors. Set to `0` to keep the original mesh. |
 | `-r` | `--texture-res` | `integer` | `1024` | **Max texture dimension (px)** before baking (e.g. `512`, `1024`, `2048`). Set to `0` to use full original texture. |
 | `-f` | `--format` | `obj`, `3mf`, `both` | `both` | **Export format**: `obj` (vertex-colored OBJ), `3mf` (color-group 3MF), or `both`. |
@@ -87,8 +103,8 @@ python cli.py model.glb --blender-path "D:/Blender/blender.exe" --set-blender-de
 | | `--set-blender-default` | `flag` | `False` | Saves the custom `--blender-path` permanently to `glb2print_config.json`. |
 
 ### CLI Shortcut Scripts:
-* **Windows**: `glb2print.bat model.glb -t 250000 -r 1024`
-* **macOS / Linux**: `./glb2print.sh model.glb -t 250000 -r 1024`
+* **Windows**: `glb2print.bat model.glb --split-axis x --split-coord 0.0`
+* **macOS / Linux**: `./glb2print.sh model.glb --split-axis x --split-coord 0.0`
 
 ---
 

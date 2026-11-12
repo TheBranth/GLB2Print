@@ -1,6 +1,7 @@
 """
 cli.py - Command Line Interface for GLB2Print.
-Cross-platform tool to turn GLB 3D models into 3D-printing ready OBJ & 3MF files.
+Cross-platform tool to turn GLB 3D models into 3D-printing ready OBJ & 3MF files,
+with Smart Splitting (Planar Cut) and 3D Visual Preview.
 """
 
 import sys
@@ -13,7 +14,7 @@ from engine.processor import ConversionJob
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="GLB2Print: Convert GLB files into 3D-printing ready OBJ & 3MF with baked vertex colors."
+        description="GLB2Print: Convert GLB files into 3D-printing ready OBJ & 3MF with baked vertex colors & smart splitting."
     )
     parser.add_argument("inputs", nargs="+", help="Input GLB file(s) or glob pattern (e.g. model.glb or models/*.glb)")
     parser.add_argument("-o", "--output-dir", default="", help="Output directory (default: same folder as input)")
@@ -24,6 +25,12 @@ def parse_args():
     parser.add_argument("--height-mm", type=float, default=0.0, help="Target height in mm (0 = preserve model scale)")
     parser.add_argument("--blender-path", default="", help="Custom path to Blender executable")
     parser.add_argument("--set-blender-default", action="store_true", help="Save the provided Blender path as default")
+
+    # Planar Cut / Smart Splitting arguments
+    parser.add_argument("--split-axis", choices=["none", "x", "y", "z"], default="none", help="Cut plane normal axis (x, y, z)")
+    parser.add_argument("--split-coord", type=float, default=0.0, help="Plane position along split axis")
+    parser.add_argument("--no-split-cap", action="store_true", help="Do not cap/fill cut holes (keep open)")
+    parser.add_argument("--preview", action="store_true", help="Open interactive 3D visual preview & planar cut tool")
 
     return parser.parse_args()
 
@@ -36,11 +43,6 @@ def main():
         cfg["blender_path"] = args.blender_path
         save_config(cfg)
         print(f"[Config] Saved default Blender path: {args.blender_path}")
-
-    if not blender_bin or not os.path.isfile(blender_bin):
-        print("ERROR: Blender executable not found!")
-        print("Please provide it via --blender-path <path> or run the GUI to configure it.")
-        sys.exit(1)
 
     # Collect input files
     all_files = []
@@ -57,6 +59,18 @@ def main():
         print("No valid .glb or .gltf files found for inputs:", args.inputs)
         sys.exit(1)
 
+    # If --preview is requested, launch the 3D visual viewer on the first model
+    if args.preview:
+        from viewer.server import launch_viewer
+        print(f"Launching 3D Visual Preview for: {all_files[0]}")
+        launch_viewer(all_files[0], cfg)
+        return
+
+    if not blender_bin or not os.path.isfile(blender_bin):
+        print("ERROR: Blender executable not found!")
+        print("Please provide it via --blender-path <path> or run the GUI to configure it.")
+        sys.exit(1)
+
     print(f"=== GLB2Print CLI ===")
     print(f"Files to convert: {len(all_files)}")
     print(f"Blender: {blender_bin}")
@@ -64,6 +78,8 @@ def main():
     print(f"Target triangles: {args.triangles if args.triangles > 0 else 'Original'}")
     print(f"Texture max res: {f'{args.texture_res}px' if args.texture_res > 0 else 'Original'}")
     print(f"Ground to Z=0: {not args.no_ground}")
+    if args.split_axis != "none":
+        print(f"Smart Split: Axis={args.split_axis.upper()}, Coord={args.split_coord:.3f}, Cap={not args.no_split_cap}")
     print("=" * 22)
 
     success_count = 0
@@ -73,8 +89,8 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
 
         stem = p.stem
-        out_obj = str(out_dir / f"{stem}_print.obj") if args.format in ("obj", "both") else None
-        out_3mf = str(out_dir / f"{stem}_print.3mf") if args.format in ("3mf", "both") else None
+        out_obj = str(out_dir / f"{stem}.obj") if args.format in ("obj", "both") else None
+        out_3mf = str(out_dir / f"{stem}.3mf") if args.format in ("3mf", "both") else None
 
         print(f"\n[{idx}/{len(all_files)}] Processing: {p.name}")
         job = ConversionJob(
@@ -86,6 +102,9 @@ def main():
             target_triangles=args.triangles,
             ground_z=(not args.no_ground),
             height_mm=args.height_mm,
+            split_axis=args.split_axis,
+            split_coord=args.split_coord,
+            split_cap=(not args.no_split_cap),
             log_callback=lambda msg: print(f"  > {msg}")
         )
 

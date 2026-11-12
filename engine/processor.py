@@ -21,6 +21,9 @@ class ConversionJob:
                  decimate_ratio: float = 1.0,
                  ground_z: bool = True,
                  height_mm: float = 0.0,
+                 split_axis: str = "none",
+                 split_coord: float = 0.0,
+                 split_cap: bool = True,
                  log_callback: Optional[Callable[[str], None]] = None,
                  progress_callback: Optional[Callable[[float, str], None]] = None):
         self.input_glb = os.path.abspath(input_glb)
@@ -32,6 +35,9 @@ class ConversionJob:
         self.decimate_ratio = decimate_ratio
         self.ground_z = ground_z
         self.height_mm = height_mm
+        self.split_axis = split_axis.lower()
+        self.split_coord = split_coord
+        self.split_cap = split_cap
         self.log_callback = log_callback or (lambda msg: print(msg))
         self.progress_callback = progress_callback or (lambda pct, msg: None)
 
@@ -60,7 +66,12 @@ class ConversionJob:
             "--target-triangles", str(self.target_triangles),
             "--decimate-ratio", str(self.decimate_ratio),
             "--height-mm", str(self.height_mm),
+            "--split-axis", self.split_axis,
+            "--split-coord", str(self.split_coord),
         ]
+
+        if not self.split_cap:
+            cmd.append("--no-split-cap")
 
         if self.output_obj:
             cmd.extend(["--output-obj", self.output_obj])
@@ -73,7 +84,6 @@ class ConversionJob:
         self.log_callback(f"Running conversion on: {os.path.basename(self.input_glb)}")
 
         try:
-            # Creation flags for Windows to avoid popping up an empty console window if launched from GUI
             creationflags = 0
             if sys.platform == "win32":
                 creationflags = subprocess.CREATE_NO_WINDOW
@@ -93,7 +103,6 @@ class ConversionJob:
                 if not line_str:
                     continue
 
-                # Parse worker milestones for progress bar
                 if "[GLB2PRINT-WORKER]" in line_str:
                     msg = line_str.replace("[GLB2PRINT-WORKER]", "").strip()
                     self.log_callback(msg)
@@ -109,9 +118,11 @@ class ConversionJob:
                     elif "Decimating mesh" in msg:
                         self.progress_callback(0.65, "Decimating polygons...")
                     elif "Decimation done" in msg:
-                        self.progress_callback(0.80, "Decimation complete.")
-                    elif "Building 3MF" in msg:
-                        self.progress_callback(0.88, "Packaging 3MF...")
+                        self.progress_callback(0.75, "Decimation complete.")
+                    elif "PLANAR CUT" in msg:
+                        self.progress_callback(0.80, "Bisecting model along plane...")
+                    elif "Building 3MF" in msg or "Exporting Part 1" in msg:
+                        self.progress_callback(0.88, "Packaging parts...")
                     elif "Exporting vertex-colored OBJ" in msg:
                         self.progress_callback(0.92, "Writing OBJ...")
                     elif "ALL DONE" in msg:

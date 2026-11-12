@@ -2,6 +2,7 @@
 *.glb
 *.gltf
 *.obj
+*.mtl
 *.3mf
 *.stl
 *.ply
