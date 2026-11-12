@@ -21,6 +21,97 @@ from engine.processor import ConversionJob
 from engine.logger import log_info, log_warn, log_error, log_crash, get_recent_logs, get_log_path
 from config import load_config, save_config
 
+def get_system_specs():
+    """Detects total physical RAM in GB and CPU thread count cross-platform."""
+    ram_gb = 16.0
+    try:
+        sys_name = platform.system()
+        if sys_name == "Windows":
+            import ctypes
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                ram_gb = stat.ullTotalPhys / (1024 ** 3)
+        elif sys_name == "Darwin":
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
+            ram_gb = int(out) / (1024 ** 3)
+        elif sys_name == "Linux":
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        ram_gb = int(line.split()[1]) / (1024 ** 2)
+                        break
+    except Exception:
+        pass
+
+    cores = os.cpu_count() or 4
+    return ram_gb, cores
+
+def classify_system(ram_gb: float, cores: int) -> dict:
+    """
+    Classifies system performance tier and provides educated processing estimates:
+    - monster: >= 31GB RAM & >= 12 cores (High-end workstations)
+    - standard: >= 15GB RAM & >= 6 cores (Capable desktop/laptop)
+    - mid_low: >= 7.5GB RAM (Budget PCs)
+    - chromebook: < 7.5GB RAM or <= 2 cores (Chromebooks, low-power netbooks)
+    """
+    if ram_gb >= 31.0 and cores >= 12:
+        return {
+            "tier": "monster",
+            "tier_label": "⚡ Workstation Beast",
+            "specs_label": f"{ram_gb:.0f}GB RAM · {cores} Cores",
+            "color": "#4ade80",
+            "estimate_speed": "ultra_fast",
+            "watchdog_seconds": 900,
+            "banner_type": "success",
+            "banner_msg": "Workstation beast detected. High-poly models (~1.5M+ faces) will process in ~10–25s."
+        }
+    elif ram_gb >= 15.0 and cores >= 6:
+        return {
+            "tier": "standard",
+            "tier_label": "💻 Standard PC",
+            "specs_label": f"{ram_gb:.0f}GB RAM · {cores} Cores",
+            "color": "#38bdf8",
+            "estimate_speed": "moderate",
+            "watchdog_seconds": 900,
+            "banner_type": "info",
+            "banner_msg": "Solid system detected. Processing high-poly models typically takes ~30–75s."
+        }
+    elif ram_gb >= 7.5:
+        return {
+            "tier": "mid_low",
+            "tier_label": "🐌 Budget PC",
+            "specs_label": f"{ram_gb:.1f}GB RAM · {cores} Cores",
+            "color": "#fbbf24",
+            "estimate_speed": "slow",
+            "watchdog_seconds": 1200,
+            "banner_type": "warning",
+            "banner_msg": "Moderate hardware. Heavy models (1M+ faces) may take 2–5 minutes. Decimation is recommended!"
+        }
+    else:
+        return {
+            "tier": "chromebook",
+            "tier_label": "⚠️ Low-Power / Chromebook",
+            "specs_label": f"{ram_gb:.1f}GB RAM · {cores} Cores",
+            "color": "#f87171",
+            "estimate_speed": "very_slow",
+            "watchdog_seconds": 1800,
+            "banner_type": "danger",
+            "banner_msg": "⚠️ Low-spec device detected! Processing 1M+ face models will take a LOOOONG time (5–15+ minutes). Please enable Decimation!"
+        }
+
 class UnifiedAppServer:
     def __init__(self, initial_glb: str = ""):
         self.cfg = load_config()
@@ -32,6 +123,11 @@ class UnifiedAppServer:
         self.last_heartbeat = time.time()
         self.is_running = True
         self.is_converting = False
+
+        self.ram_gb, self.cores = get_system_specs()
+        self.system_info = classify_system(self.ram_gb, self.cores)
+        self.watchdog_timeout = self.system_info["watchdog_seconds"]
+        log_info(f"System detected: {self.system_info['specs_label']} ({self.system_info['tier_label']}). Adaptive idle watchdog: {self.watchdog_timeout}s.")
 
     def _find_free_port(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -62,6 +158,13 @@ class UnifiedAppServer:
                     self.send_header("Content-Type", "text/plain")
                     self.end_headers()
                     self.wfile.write(b"OK")
+                    return
+
+                elif self.path == "/api/system_specs":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(parent_self.system_info).encode("utf-8"))
                     return
 
                 elif self.path == "/api/logs":
@@ -264,9 +367,9 @@ class UnifiedAppServer:
                 if self.is_converting:
                     self.last_heartbeat = time.time()
                     continue
-                # If no heartbeat for > 60s, shutdown
-                if time.time() - self.last_heartbeat > 60:
-                    log_warn(f"Watchdog timeout triggered (no heartbeat for {int(time.time() - self.last_heartbeat)}s). Stopping server...")
+                # If no heartbeat for > watchdog_timeout, shutdown
+                if time.time() - self.last_heartbeat > self.watchdog_timeout:
+                    log_warn(f"Watchdog timeout triggered (no heartbeat for {int(time.time() - self.last_heartbeat)}s > {self.watchdog_timeout}s). Stopping server...")
                     self.stop()
                     break
         threading.Thread(target=watchdog, daemon=True).start()

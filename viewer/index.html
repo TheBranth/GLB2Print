@@ -453,6 +453,11 @@
             <span class="model-label">Geometry:</span>
             <span class="model-val" id="model-poly-count">-</span>
           </div>
+          <div class="model-info-row" style="margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(255,255,255,0.08);">
+            <span class="model-label">Hardware:</span>
+            <span class="model-val" id="sys-tier-badge" style="font-size: 0.73rem; font-weight: 600;">Detecting...</span>
+          </div>
+          <div id="sys-estimate-banner" style="display: none; margin-top: 7px; font-size: 0.72rem; border-radius: 6px; padding: 6px 9px; line-height: 1.35;"></div>
           <div class="file-actions">
             <button class="btn-file" onclick="triggerOpenFileDialog()">📁 Open Model</button>
             <input type="file" id="file-picker" accept=".glb,.gltf" style="display:none;" onchange="onFilePicked(event)">
@@ -735,8 +740,68 @@
 
       setupEventListeners();
       setupHeartbeat();
+      fetchSystemSpecs();
       checkModelAndInit();
       animate();
+    }
+
+    let systemSpecs = null;
+    function fetchSystemSpecs() {
+      fetch('/api/system_specs')
+        .then(r => r.json())
+        .then(specs => {
+          systemSpecs = specs;
+          const badge = document.getElementById('sys-tier-badge');
+          if (badge) {
+            badge.innerText = `${specs.tier_label} (${specs.specs_label})`;
+            badge.style.color = specs.color;
+          }
+          updatePerformanceEstimate();
+        })
+        .catch(() => {});
+    }
+
+    function updatePerformanceEstimate() {
+      if (!systemSpecs) return;
+      const banner = document.getElementById('sys-estimate-banner');
+      if (!banner) return;
+
+      if (!primaryMesh || totalFaces === 0) {
+        banner.style.display = 'none';
+        return;
+      }
+
+      banner.style.display = 'block';
+
+      if (systemSpecs.tier === 'chromebook') {
+        banner.style.background = 'rgba(239, 68, 68, 0.15)';
+        banner.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+        banner.style.color = '#fca5a5';
+        if (totalFaces > 500000) {
+          banner.innerHTML = `⚠️ <b>Low-Power / Chromebook Alert:</b> Processing <b>${totalFaces.toLocaleString()} faces</b> on this hardware will take a <b>LOOOONG time (5–15+ min)</b>. We strongly recommend enabling Decimation (100k–250k)!`;
+        } else {
+          banner.innerHTML = `ℹ Low-spec device detected. Model is lightweight (${totalFaces.toLocaleString()} faces), processing should take ~1–2 min.`;
+        }
+      } else if (systemSpecs.tier === 'mid_low') {
+        banner.style.background = 'rgba(245, 158, 11, 0.15)';
+        banner.style.border = '1px solid rgba(245, 158, 11, 0.35)';
+        banner.style.color = '#fde047';
+        if (totalFaces > 500000) {
+          banner.innerHTML = `⏳ <b>Budget System Notice:</b> Model has <b>${totalFaces.toLocaleString()} faces</b>. Estimated processing time: ~2–4 minutes.`;
+        } else {
+          banner.innerHTML = `✔ Budget PC detected. Model has ${totalFaces.toLocaleString()} faces (est. ~30–60s).`;
+        }
+      } else if (systemSpecs.tier === 'monster') {
+        banner.style.background = 'rgba(34, 197, 94, 0.15)';
+        banner.style.border = '1px solid rgba(34, 197, 94, 0.3)';
+        banner.style.color = '#86efac';
+        banner.innerHTML = `⚡ <b>Beast Rig:</b> ${systemSpecs.specs_label}. Ready for ultra-fast processing (~10–25s even on heavy models).`;
+      } else {
+        banner.style.background = 'rgba(56, 189, 248, 0.15)';
+        banner.style.border = '1px solid rgba(56, 189, 248, 0.3)';
+        banner.style.color = '#7dd3fc';
+        banner.innerHTML = `💻 <b>Standard PC:</b> ${systemSpecs.specs_label}. Estimated processing time: ~30–75s.`;
+      }
     }
 
     function checkModelAndInit() {
@@ -837,6 +902,8 @@
           `${(size.x * 1000).toFixed(1)} × ${(size.y * 1000).toFixed(1)} × ${(size.z * 1000).toFixed(1)} mm`;
         document.getElementById('model-poly-count').innerText = 
           `${totalFaces.toLocaleString()} faces (${primaryMesh.geometry.attributes.position.count.toLocaleString()} verts)`;
+
+        updatePerformanceEstimate();
 
         const maxDim = Math.max(size.x, size.y, size.z);
         camera.position.set(center.x + maxDim * 1.5, center.y + maxDim * 1.2, center.z + maxDim * 1.8);
@@ -1394,7 +1461,13 @@
 
       btn.disabled = true;
       progressFill.style.width = '15%';
-      statusLbl.innerText = 'Starting background processing...';
+      if (systemSpecs && systemSpecs.tier === 'chromebook') {
+        statusLbl.innerText = 'Processing in Blender... (Low-spec hardware: grab a coffee ☕, this will take several minutes!)';
+      } else if (systemSpecs && systemSpecs.tier === 'mid_low') {
+        statusLbl.innerText = 'Processing in Blender... (Budget PC: may take 2–4 min on heavy models)';
+      } else {
+        statusLbl.innerText = 'Starting background processing...';
+      }
 
       const fmtObj = document.getElementById('chk-fmt-obj').checked;
       const fmt3mf = document.getElementById('chk-fmt-3mf').checked;
