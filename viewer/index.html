@@ -1122,7 +1122,24 @@
     }
 
     function triggerOpenFileDialog() {
-      document.getElementById('file-picker').click();
+      // 1. Try native server dialog first (defaults directly to the server / project directory)
+      fetch('/api/select_file', { method: 'POST' })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success && res.has_file) {
+            document.getElementById('card-model-name').innerText = res.filename;
+            loadActiveModel();
+          } else if (res.canceled) {
+            // User pressed cancel in the native picker
+          } else {
+            // Fallback to browser file picker
+            document.getElementById('file-picker').click();
+          }
+        })
+        .catch(() => {
+          // Fallback to browser file picker on error
+          document.getElementById('file-picker').click();
+        });
     }
     function onFilePicked(e) {
       if (e.target.files && e.target.files[0]) {

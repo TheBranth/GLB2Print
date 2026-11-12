@@ -21,6 +21,30 @@ from engine.processor import ConversionJob
 from engine.logger import log_info, log_warn, log_error, log_crash, get_recent_logs, get_log_path
 from config import load_config, save_config
 
+def choose_file_native(initial_dir: str) -> str:
+    """Opens a native OS file dialog defaulted to initial_dir to pick a .glb/.gltf file."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askopenfilename(
+            initialdir=initial_dir,
+            title="Open 3D Model (GLB / GLTF)",
+            filetypes=[
+                ("3D Models (*.glb, *.gltf)", "*.glb;*.gltf"),
+                ("GLB Files (*.glb)", "*.glb"),
+                ("GLTF Files (*.gltf)", "*.gltf"),
+                ("All Files (*.*)", "*.*")
+            ]
+        )
+        root.destroy()
+        return path
+    except Exception as e:
+        log_warn(f"Native file dialog unavailable: {e}")
+        return ""
+
 def get_system_specs():
     """Detects total physical RAM in GB and CPU thread count cross-platform."""
     ram_gb = 16.0
@@ -248,6 +272,37 @@ class UnifiedAppServer:
                     self.send_response(200)
                     self.end_headers()
                     return
+
+                elif self.path == "/api/select_file":
+                    project_root = Path(__file__).resolve().parent.parent
+                    initial_dir = str(project_root)
+                    if parent_self.glb_path and os.path.isfile(parent_self.glb_path):
+                        initial_dir = os.path.dirname(parent_self.glb_path)
+
+                    chosen = choose_file_native(initial_dir)
+                    if chosen and os.path.isfile(chosen):
+                        parent_self.glb_path = os.path.abspath(chosen)
+                        parent_self.original_filename = os.path.basename(chosen)
+                        log_info(f"Selected model via native dialog: {parent_self.glb_path}")
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({
+                            "success": True,
+                            "has_file": True,
+                            "filename": parent_self.original_filename
+                        }).encode("utf-8"))
+                        return
+                    else:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({
+                            "success": True,
+                            "canceled": (chosen == ""),
+                            "has_file": False
+                        }).encode("utf-8"))
+                        return
 
                 elif self.path == "/api/upload":
                     # Handle multipart/form-data upload from drag & drop
