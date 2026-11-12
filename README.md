@@ -125,3 +125,10 @@ To enable 1-click conversion directly from Windows Explorer:
 1. Right-click `install_context_menu.ps1` and select **Run with PowerShell**.
 2. Now, you can right-click any `.glb` or `.gltf` file in Windows Explorer and choose **"Prepare for 3D Printing (GLB2Print)"**.
 3. To remove the menu entry, run `uninstall_context_menu.ps1`.
+
+---
+
+## Disclaimer
+
+Blender, Tripo, Meshy, Rodin, OrcaSlicer, Bambu Studio, PrusaSlicer, Creality Print, Cura, and Snapmaker Orca are trademarks of their respective owners. GLB2Print is an independent open-source utility and is not affiliated with or endorsed by any of these projects.
+
