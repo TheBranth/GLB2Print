@@ -2,103 +2,71 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>GLB2Print — 3D Viewer, Planar Cut & Lasso Split</title>
+  <title>GLB2Print — 3D-Printing Preparation & Smart Split</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-    body, html { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121316; color: #f3f4f6; }
-    #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+    body, html { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f1013; color: #f3f4f6; }
     
-    /* 2D Lasso Drawing Canvas */
-    #lasso-canvas {
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      z-index: 5;
-      pointer-events: none;
-    }
-    #lasso-canvas.drawing {
-      pointer-events: auto;
-      cursor: crosshair;
-    }
+    #app-container { display: flex; width: 100vw; height: 100vh; position: relative; }
 
-    /* UI Overlay Panel */
+    /* Left Sidebar */
     #sidebar {
-      position: absolute;
-      top: 16px;
-      left: 16px;
-      z-index: 10;
-      width: 360px;
-      max-height: calc(100% - 32px);
-      overflow-y: auto;
-      background: rgba(22, 23, 29, 0.94);
-      backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-    }
-    #sidebar::-webkit-scrollbar { width: 5px; }
-    #sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
-
-    /* Top Nav / Mode Tabs */
-    .tab-bar {
+      width: 380px;
+      height: 100%;
+      background: #16171c;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
-      background: rgba(0, 0, 0, 0.4);
-      border-radius: 8px;
-      padding: 3px;
-      margin-bottom: 14px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      flex-direction: column;
+      z-index: 20;
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
     }
-    .tab-btn {
-      flex: 1;
-      padding: 7px;
-      border: none;
-      background: transparent;
+
+    #sidebar-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #1a1b22;
+    }
+    .brand-title { font-size: 1.15rem; font-weight: 800; color: #ffffff; display: flex; align-items: center; gap: 8px; }
+    .brand-title span { color: #38bdf8; }
+    .header-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
       color: #9ca3af;
-      font-size: 0.78rem;
-      font-weight: 700;
+      padding: 5px 9px;
       border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      text-align: center;
-    }
-    .tab-btn.active {
-      background: #2563eb;
-      color: #ffffff;
-      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
-    }
-
-    h2 { font-size: 1.05rem; font-weight: 700; color: #ffffff; margin-bottom: 2px; display: flex; align-items: center; justify-content: space-between; }
-    .subtitle { font-size: 0.75rem; color: #9ca3af; margin-bottom: 12px; }
-    
-    .badge {
-      display: inline-block;
-      padding: 2px 7px;
-      border-radius: 5px;
-      font-size: 0.7rem;
+      font-size: 0.78rem;
       font-weight: 600;
-      background: rgba(59, 130, 246, 0.2);
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.3);
+      cursor: pointer;
+      transition: all 0.15s;
     }
+    .header-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
 
-    .info-card {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 8px 10px;
-      margin-bottom: 12px;
-      font-size: 0.76rem;
+    #sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
-    .info-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
-    .info-row:last-child { margin-bottom: 0; }
-    .info-label { color: #9ca3af; }
-    .info-val { font-weight: 600; color: #e5e7eb; }
+    #sidebar-content::-webkit-scrollbar { width: 4px; }
+    #sidebar-content::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 2px; }
 
-    .section-title {
+    /* Card */
+    .card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 9px;
+      padding: 12px;
+    }
+    .card-title {
       font-size: 0.8rem;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.04em;
       color: #38bdf8;
       margin-bottom: 8px;
       display: flex;
@@ -106,42 +74,59 @@
       justify-content: space-between;
     }
 
-    .btn-group {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 10px;
-    }
-    .axis-btn {
+    /* Model Info */
+    .model-info-row { display: flex; justify-content: space-between; font-size: 0.76rem; margin-bottom: 4px; }
+    .model-info-row:last-child { margin-bottom: 0; }
+    .model-label { color: #9ca3af; }
+    .model-val { color: #f3f4f6; font-weight: 600; }
+
+    .file-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .btn-file {
       flex: 1;
       padding: 7px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.12);
       background: rgba(255, 255, 255, 0.06);
-      color: #d1d5db;
+      color: #e5e7eb;
       border-radius: 6px;
-      font-size: 0.76rem;
+      font-size: 0.78rem;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.15s ease;
       text-align: center;
+      transition: all 0.15s;
     }
-    .axis-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
-    .axis-btn.active {
+    .btn-file:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.25); }
+
+    /* Pills & Radios */
+    .pill-group { display: flex; gap: 6px; }
+    .pill-btn {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      color: #9ca3af;
+      border-radius: 6px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+    }
+    .pill-btn:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+    .pill-btn.active {
       background: #2563eb;
       border-color: #3b82f6;
       color: #ffffff;
-      box-shadow: 0 0 10px rgba(37, 99, 235, 0.5);
+      box-shadow: 0 0 10px rgba(37, 99, 235, 0.4);
     }
 
-    .slider-container { margin-bottom: 12px; }
-    .slider-header { display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 5px; }
-    .slider-label { color: #9ca3af; }
-    .slider-val { font-weight: 700; color: #38bdf8; font-family: monospace; font-size: 0.82rem; }
-
+    /* Sliders */
+    .slider-header { display: flex; justify-content: space-between; font-size: 0.74rem; margin-bottom: 5px; }
+    .slider-val { font-weight: 700; color: #38bdf8; font-family: monospace; }
     input[type=range] {
       width: 100%;
       height: 5px;
       border-radius: 3px;
-      background: rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.12);
       outline: none;
       -webkit-appearance: none;
     }
@@ -155,45 +140,62 @@
       box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
     }
 
-    .checkbox-row {
+    /* Checkbox rows */
+    .check-row {
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 0.78rem;
+      font-size: 0.77rem;
       color: #d1d5db;
-      margin-bottom: 10px;
       cursor: pointer;
-    }
-    .checkbox-row input { cursor: pointer; accent-color: #2563eb; width: 14px; height: 14px; }
-
-    .action-btn {
-      width: 100%;
-      padding: 9px;
-      border: none;
-      border-radius: 7px;
-      font-size: 0.84rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s ease;
       margin-bottom: 6px;
     }
-    .btn-split {
-      background: #2563eb;
-      color: #ffffff;
-      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
-    }
-    .btn-split:hover { background: #1d4ed8; }
-    .btn-split:disabled { background: #4b5563; cursor: not-allowed; opacity: 0.6; }
+    .check-row:last-child { margin-bottom: 0; }
+    .check-row input { cursor: pointer; accent-color: #2563eb; width: 14px; height: 14px; }
 
-    .btn-lasso-mode {
-      background: #059669;
-      color: #ffffff;
-      box-shadow: 0 4px 12px rgba(5, 150, 105, 0.4);
+    /* Splitting Tabs */
+    .split-tabs {
+      display: flex;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 7px;
+      padding: 3px;
       margin-bottom: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
     }
-    .btn-lasso-mode.active {
+    .split-tab {
+      flex: 1;
+      padding: 5px;
+      border: none;
+      background: transparent;
+      color: #9ca3af;
+      font-size: 0.72rem;
+      font-weight: 700;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+    }
+    .split-tab.active { background: #2563eb; color: #ffffff; }
+
+    .btn-lasso {
+      width: 100%;
+      padding: 8px;
+      border: none;
+      border-radius: 6px;
+      background: #059669;
+      color: #fff;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn-lasso.active {
       background: #dc2626;
-      box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
       animation: pulse 1.5s infinite;
     }
     @keyframes pulse {
@@ -202,90 +204,139 @@
       100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
     }
 
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.08);
-      color: #e5e7eb;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      font-size: 0.75rem;
-      padding: 5px 8px;
-      border-radius: 5px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .btn-secondary:hover { background: rgba(255, 255, 255, 0.14); }
-
-    /* Parts Deck */
-    .parts-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 12px;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    .part-card {
+    /* Staged Parts List */
+    .parts-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; max-height: 140px; overflow-y: auto; }
+    .part-item {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 6px;
-      padding: 6px 8px;
-      font-size: 0.76rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 5px;
+      padding: 5px 8px;
+      font-size: 0.75rem;
     }
-    .part-color-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 3px;
-      margin-right: 6px;
-      display: inline-block;
-    }
-    .part-name-input {
-      background: transparent;
-      border: none;
-      color: #ffffff;
-      font-weight: 600;
-      font-size: 0.78rem;
-      outline: none;
-      width: 110px;
-    }
-    .part-faces-count { color: #9ca3af; font-size: 0.7rem; margin-left: auto; margin-right: 8px; }
-    .btn-del-part {
-      background: transparent;
-      border: none;
-      color: #ef4444;
-      cursor: pointer;
-      font-weight: bold;
-      padding: 2px 4px;
-    }
+    .part-dot { width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; flex-shrink: 0; }
+    .part-name { background: transparent; border: none; color: #fff; font-weight: 600; font-size: 0.75rem; width: 110px; outline: none; }
+    .part-count { color: #9ca3af; font-size: 0.7rem; margin-left: auto; margin-right: 8px; }
+    .part-del { background: transparent; border: none; color: #ef4444; font-weight: bold; cursor: pointer; padding: 0 4px; }
 
-    #instructions {
+    /* Footer Action */
+    #sidebar-footer {
+      padding: 14px 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      background: #1a1b22;
+    }
+    .btn-main-action {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: #ffffff;
+      font-size: 0.88rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn-main-action:hover { background: #1d4ed8; }
+    .btn-main-action:disabled { background: #4b5563; cursor: not-allowed; opacity: 0.6; box-shadow: none; }
+
+    .progress-bar-container { width: 100%; height: 5px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+    .progress-bar-fill { height: 100%; width: 0%; background: #38bdf8; transition: width 0.2s ease; }
+    .status-text { font-size: 0.73rem; color: #9ca3af; text-align: center; margin-top: 5px; }
+
+    /* 3D Viewport Area */
+    #viewport-container {
+      flex: 1;
+      height: 100%;
+      position: relative;
+      background: #0f1013;
+    }
+    #canvas-container { width: 100%; height: 100%; }
+
+    #lasso-canvas {
       position: absolute;
-      bottom: 16px;
-      left: 16px;
+      top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 5;
+      pointer-events: none;
+    }
+    #lasso-canvas.drawing { pointer-events: auto; cursor: crosshair; }
+
+    /* Viewport Overlay Controls */
+    #viewport-hud {
+      position: absolute;
+      top: 16px;
+      right: 16px;
       z-index: 10;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(22, 23, 29, 0.85);
+      backdrop-filter: blur(8px);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 8px;
-      padding: 7px 12px;
-      font-size: 0.73rem;
+      padding: 6px 10px;
+      display: flex;
+      gap: 8px;
+      font-size: 0.74rem;
+      color: #9ca3af;
+    }
+    .hud-btn {
+      background: transparent;
+      border: none;
+      color: #cbd5e1;
+      cursor: pointer;
+      font-size: 0.74rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .hud-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+    #viewport-tips {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.65);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.72rem;
       color: #9ca3af;
       pointer-events: none;
     }
 
-    #loading-overlay {
+    /* Drag & Drop Overlay */
+    #drop-overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(18, 19, 22, 0.96);
+      background: rgba(37, 99, 235, 0.25);
+      border: 3px dashed #38bdf8;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #ffffff;
+      pointer-events: none;
+    }
+
+    #loading-spinner-overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(15, 16, 19, 0.95);
+      z-index: 100;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      z-index: 100;
     }
     .spinner {
-      width: 44px;
-      height: 44px;
+      width: 44px; height: 44px;
       border: 4px solid rgba(255, 255, 255, 0.1);
       border-top-color: #38bdf8;
       border-radius: 50%;
@@ -293,135 +344,225 @@
       margin-bottom: 12px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Modal */
+    #settings-modal {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-box {
+      width: 480px;
+      background: #1e1f26;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      padding: 18px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+    }
+    .modal-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 14px; display: flex; justify-content: space-between; }
+    .modal-input {
+      width: 100%;
+      padding: 8px 10px;
+      background: #141418;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.8rem;
+      margin-top: 4px;
+      outline: none;
+    }
   </style>
 </head>
 <body>
-  <div id="loading-overlay">
-    <div class="spinner"></div>
-    <div id="loading-text" style="font-size: 0.95rem; font-weight: 600;">Loading 3D Model...</div>
-  </div>
-
-  <div id="canvas-container"></div>
-  <canvas id="lasso-canvas"></canvas>
-
-  <div id="sidebar">
-    <h2>
-      <span id="model-name">Model</span>
-      <span class="badge" id="model-badge">GLB</span>
-    </h2>
-    <div class="subtitle" id="model-stats">Calculating bounding box...</div>
-
-    <div class="tab-bar">
-      <button class="tab-btn active" id="tab-planar" onclick="switchMode('planar')">📐 Planar Cut</button>
-      <button class="tab-btn" id="tab-lasso" onclick="switchMode('lasso')">🖊 Lasso / Region Split</button>
-    </div>
-
-    <div class="info-card">
-      <div class="info-row">
-        <span class="info-label">Bounding Box:</span>
-        <span class="info-val" id="bounds-size">-</span>
-      </div>
-      <div class="info-row">
-        <span class="info-label">Polygons / Verts:</span>
-        <span class="info-val" id="poly-count">-</span>
-      </div>
-      <div class="info-row" id="selection-info-row" style="display: none;">
-        <span class="info-label" style="color: #fbbf24;">Selected Faces:</span>
-        <span class="info-val" id="selected-count" style="color: #fbbf24;">0</span>
-      </div>
-    </div>
-
-    <!-- PANEL 1: PLANAR CUT -->
-    <div id="panel-planar">
-      <div class="section-title">
-        <span>Cut Plane Axis</span>
+  <div id="app-container">
+    <!-- LEFT SIDEBAR -->
+    <div id="sidebar">
+      <div id="sidebar-header">
+        <div class="brand-title">⚡ GLB<span>2Print</span></div>
+        <button class="header-btn" onclick="openSettingsModal()">⚙ Settings</button>
       </div>
 
-      <div class="btn-group">
-        <button class="axis-btn active" id="btn-axis-x" onclick="setCutAxis('X')">X (Left/Right)</button>
-        <button class="axis-btn" id="btn-axis-y" onclick="setCutAxis('Y')">Y (Front/Back)</button>
-        <button class="axis-btn" id="btn-axis-z" onclick="setCutAxis('Z')">Z (Top/Bottom)</button>
-      </div>
-
-      <div class="slider-container">
-        <div class="slider-header">
-          <span class="slider-label" id="slider-title">Plane Position (X):</span>
-          <span class="slider-val" id="slider-val">0.00 mm</span>
+      <div id="sidebar-content">
+        <!-- 1. MODEL INFO CARD -->
+        <div class="card">
+          <div class="card-title">
+            <span id="card-model-name">Model</span>
+            <span style="font-size: 0.68rem; color: #38bdf8; background: rgba(56, 189, 248, 0.15); padding: 1px 6px; border-radius: 4px;">GLB / GLTF</span>
+          </div>
+          <div class="model-info-row">
+            <span class="model-label">Size (X, Y, Z):</span>
+            <span class="model-val" id="model-bounds-dim">-</span>
+          </div>
+          <div class="model-info-row">
+            <span class="model-label">Geometry:</span>
+            <span class="model-val" id="model-poly-count">-</span>
+          </div>
+          <div class="file-actions">
+            <button class="btn-file" onclick="triggerOpenFileDialog()">📁 Open Model</button>
+            <input type="file" id="file-picker" accept=".glb,.gltf" style="display:none;" onchange="onFilePicked(event)">
+          </div>
         </div>
-        <input type="range" id="cut-slider" min="-100" max="100" step="0.1" value="0" oninput="onSliderMove(this.value)">
+
+        <!-- 2. TEXTURE RESOLUTION -->
+        <div class="card">
+          <div class="card-title">Pre-Bake Texture Res</div>
+          <div class="pill-group" id="tex-res-pills">
+            <div class="pill-btn" onclick="setTexRes(0)">Original</div>
+            <div class="pill-btn" onclick="setTexRes(2048)">2048px</div>
+            <div class="pill-btn active" onclick="setTexRes(1024)">1024px</div>
+            <div class="pill-btn" onclick="setTexRes(512)">512px</div>
+          </div>
+        </div>
+
+        <!-- 3. DECIMATION -->
+        <div class="card">
+          <div class="card-title">
+            <span>Smart Decimation</span>
+            <label class="check-row" style="margin: 0; font-size: 0.72rem;">
+              <input type="checkbox" id="chk-decimate" checked onchange="toggleDecimate(this.checked)"> Enable
+            </label>
+          </div>
+          <div class="slider-header">
+            <span class="model-label">Target Triangles:</span>
+            <span class="slider-val" id="decimate-val-lbl">250,000 faces</span>
+          </div>
+          <input type="range" id="decimate-slider" min="50000" max="1000000" step="10000" value="250000" oninput="onDecimateSlider(this.value)">
+          <div class="pill-group" style="margin-top: 8px;">
+            <div class="pill-btn" onclick="setDecimatePreset(100000)">100k (Fast)</div>
+            <div class="pill-btn active" id="btn-pre-250" onclick="setDecimatePreset(250000)">250k (Sweetspot)</div>
+            <div class="pill-btn" onclick="setDecimatePreset(500000)">500k (Detail)</div>
+          </div>
+        </div>
+
+        <!-- 4. SPLITTING & STAGING DECK -->
+        <div class="card">
+          <div class="card-title">Splitting & Staging</div>
+          <div class="split-tabs">
+            <button class="split-tab active" id="tab-split-none" onclick="setSplitMode('none')">Full Model</button>
+            <button class="split-tab" id="tab-split-planar" onclick="setSplitMode('planar')">Planar Cut</button>
+            <button class="split-tab" id="tab-split-lasso" onclick="setSplitMode('lasso')">Lasso Split</button>
+          </div>
+
+          <!-- PLANAR PANEL -->
+          <div id="deck-planar" style="display: none;">
+            <div class="pill-group" style="margin-bottom: 8px;">
+              <div class="pill-btn active" id="btn-plane-x" onclick="setPlanarAxis('X')">X (L/R)</div>
+              <div class="pill-btn" id="btn-plane-y" onclick="setPlanarAxis('Y')">Y (F/B)</div>
+              <div class="pill-btn" id="btn-plane-z" onclick="setPlanarAxis('Z')">Z (T/B)</div>
+            </div>
+            <div class="slider-header">
+              <span class="model-label">Cut Plane Position:</span>
+              <span class="slider-val" id="plane-coord-lbl">0.00 mm</span>
+            </div>
+            <input type="range" id="plane-slider" min="-100" max="100" step="0.1" value="0" oninput="onPlaneSlider(this.value)">
+            <div style="display: flex; justify-content: space-between; margin-top: 6px;">
+              <button class="btn-file" style="padding: 4px;" onclick="centerPlane()">⌖ Center Plane</button>
+            </div>
+          </div>
+
+          <!-- LASSO PANEL -->
+          <div id="deck-lasso" style="display: none;">
+            <button class="btn-lasso" id="btn-draw-lasso" onclick="toggleLassoDraw()">
+              🖊 Draw Selection Lasso (Shift)
+            </button>
+            <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;">
+              <label class="check-row">
+                <input type="checkbox" id="lasso-front-only" checked> Surface / Front-Facing Only
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="lasso-color-snap" checked> Color-Boundary Snap
+              </label>
+            </div>
+            <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <button class="btn-file" style="padding: 4px;" onclick="clearSelection()">Clear Sel</button>
+              <button class="btn-file" style="padding: 4px;" onclick="invertSelection()">Invert</button>
+              <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="createPartFromSelection()">+ Add Part</button>
+            </div>
+            <div class="parts-list" id="staged-parts-box">
+              <!-- Dynamically populated parts -->
+            </div>
+            <button class="btn-file" style="width: 100%; margin-top: 2px;" onclick="autoAssignRemaining()">⚡ Auto-Assign Remaining to Part</button>
+          </div>
+
+          <!-- CAPPING OPTION -->
+          <div style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 8px;">
+            <label class="check-row">
+              <input type="checkbox" id="chk-cap-holes" checked> Cap Boundary Holes (Watertight Solids)
+            </label>
+          </div>
+        </div>
+
+        <!-- 5. PRINT BED PREP & FORMATS -->
+        <div class="card">
+          <div class="card-title">3D Print Bed & Formats</div>
+          <label class="check-row">
+            <input type="checkbox" id="chk-ground-z" checked> Auto-ground to bed ($Z = 0.0$)
+          </label>
+          <div style="display: flex; gap: 12px; margin-top: 6px;">
+            <label class="check-row">
+              <input type="checkbox" id="chk-fmt-obj" checked> OBJ (vertex colors)
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="chk-fmt-3mf" checked> 3MF (color groups)
+            </label>
+          </div>
+        </div>
       </div>
 
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <button class="btn-secondary" onclick="centerPlane()">⌖ Center Cut Plane</button>
-        <label class="checkbox-row" style="margin-bottom: 0;">
-          <input type="checkbox" id="show-plane" checked onchange="togglePlane(this.checked)">
-          <span>Show Plane</span>
-        </label>
+      <!-- SIDEBAR FOOTER ACTION -->
+      <div id="sidebar-footer">
+        <button class="btn-main-action" id="btn-export-all" onclick="executeExport()">
+          ⚡ CONVERT FOR 3D PRINTING
+        </button>
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="progress-fill"></div>
+        </div>
+        <div class="status-text" id="status-label">Ready</div>
       </div>
-
-      <label class="checkbox-row">
-        <input type="checkbox" id="cap-cut-planar" checked>
-        <span>Cap Cut Faces (Watertight Solids)</span>
-      </label>
-
-      <button class="action-btn btn-split" id="btn-split-planar" onclick="triggerPlanarSplit()">
-        ✂ Split & Export 2 Parts
-      </button>
     </div>
 
-    <!-- PANEL 2: LASSO / REGION SPLIT (NEW FEATURE!) -->
-    <div id="panel-lasso" style="display: none;">
-      <button class="action-btn btn-lasso-mode" id="btn-toggle-lasso" onclick="toggleLassoMode()">
-        🖊 Draw Selection Lasso
-      </button>
+    <!-- CENTER 3D VIEWPORT -->
+    <div id="viewport-container">
+      <div id="canvas-container"></div>
+      <canvas id="lasso-canvas"></canvas>
 
-      <div class="section-title">
-        <span>Selection Options</span>
+      <div id="viewport-hud">
+        <button class="hud-btn" onclick="resetCamera()">⌖ Reset Camera</button>
+        <button class="hud-btn" onclick="toggleWireframe()">Mesh Wireframe</button>
       </div>
 
-      <label class="checkbox-row">
-        <input type="checkbox" id="lasso-front-only" checked>
-        <span>Surface / Front-Facing Only</span>
-      </label>
-
-      <label class="checkbox-row">
-        <input type="checkbox" id="lasso-color-snap" checked>
-        <span>Color-Boundary Snap (Fast Contrast)</span>
-      </label>
-
-      <div style="display: flex; gap: 6px; margin-bottom: 12px;">
-        <button class="btn-secondary" style="flex: 1;" onclick="clearSelection()">Clear Sel</button>
-        <button class="btn-secondary" style="flex: 1;" onclick="invertSelection()">Invert Sel</button>
+      <div id="viewport-tips">
+        Left Click: Orbit &nbsp;|&nbsp; Right Click: Pan &nbsp;|&nbsp; Scroll: Zoom &nbsp;|&nbsp; <b>Hold Shift</b> to draw lasso
       </div>
 
-      <div class="section-title">
-        <span>Staged Parts Deck</span>
-        <button class="btn-secondary" style="padding: 2px 6px; font-size: 0.7rem;" onclick="createPartFromSelection()">+ Add Part</button>
+      <div id="drop-overlay">Drop .GLB Model Here to Load</div>
+      
+      <div id="loading-spinner-overlay">
+        <div class="spinner"></div>
+        <div id="spinner-text" style="font-size: 0.95rem; font-weight: 600;">Loading 3D Model...</div>
       </div>
-
-      <div class="parts-list" id="parts-container">
-        <!-- Dynamically populated parts -->
-      </div>
-
-      <button class="btn-secondary" style="width: 100%; margin-bottom: 10px;" onclick="autoAssignRemaining()">
-        ⚡ Auto-Assign Remaining to Final Part
-      </button>
-
-      <label class="checkbox-row">
-        <input type="checkbox" id="cap-cut-lasso" checked>
-        <span>Cap Boundary Holes (Watertight Solids)</span>
-      </label>
-
-      <button class="action-btn btn-split" id="btn-export-staged" onclick="triggerLassoSplit()" disabled>
-        🚀 Export All Staged Parts
-      </button>
     </div>
-
-    <div id="split-status" style="font-size: 0.74rem; color: #9ca3af; text-align: center; margin-top: 6px;"></div>
   </div>
 
-  <div id="instructions">
-    Left Click + Drag: Orbit &nbsp;|&nbsp; Right Click: Pan &nbsp;|&nbsp; Scroll: Zoom &nbsp;|&nbsp; <b>Hold Shift</b> to draw lasso
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal">
+    <div class="modal-box">
+      <div class="modal-title">
+        <span>⚙ GLB2Print Configuration</span>
+        <button style="background: transparent; border: none; color: #fff; cursor: pointer;" onclick="closeSettingsModal()">✕</button>
+      </div>
+      <label class="model-label">Blender Executable Path:</label>
+      <input class="modal-input" id="cfg-blender-input" placeholder="e.g. D:\Blender\blender.exe">
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+        <button class="btn-file" onclick="closeSettingsModal()">Cancel</button>
+        <button class="btn-file" style="background: #2563eb; color: #fff;" onclick="saveConfigFromModal()">Save Settings</button>
+      </div>
+    </div>
   </div>
 
   <script src="/static/three.min.js"></script>
@@ -435,25 +576,15 @@
     let primaryMesh = null;
     let boundingBox = null;
     let cutPlaneMesh = null;
-    let activeAxis = 'X';
-    let currentCutCoord = 0;
-    let currentMode = 'planar';
 
-    // Lasso & Selection State
-    let isLassoMode = false;
-    let isDrawingLasso = false;
-    let lassoPoints = [];
-    let lassoCanvas, lassoCtx;
-    
-    // Per-face / per-vertex data
+    // Viewport Raycasting Data (Fast Spatial Caching for 60 FPS)
     let totalFaces = 0;
-    let faceCenters = []; // Array of Vector3
-    let faceNormals = []; // Array of Vector3
-    let faceColors = [];  // Array of RGB
+    let faceCenters = null;
+    let faceNormals = null;
+    let originalVertexColors = null;
     let selectedFaceIndices = new Set();
-    
-    // Multi-Part Staging
-    // Each part: { id, name, colorHex, colorRGB, faceIndices: Set }
+
+    // Staged Parts
     const PART_PALETTE = [
       { hex: '#06b6d4', rgb: [6, 182, 212] },   // Cyan
       { hex: '#f97316', rgb: [249, 115, 22] },  // Orange
@@ -463,20 +594,33 @@
       { hex: '#eab308', rgb: [234, 179, 8] }    // Yellow
     ];
     let stagedParts = [];
-    let originalVertexColors = null;
 
-    function init() {
+    // State Variables
+    let currentSplitMode = 'none'; // 'none', 'planar', 'lasso'
+    let currentPlaneAxis = 'X';
+    let currentPlaneCoord = 0.0;
+    let currentTexRes = 1024;
+    let currentDecimateCount = 250000;
+    let isDecimateEnabled = true;
+
+    // Lasso drawing state
+    let isLassoMode = false;
+    let isDrawingLasso = false;
+    let lassoPoints = [];
+    let lassoCanvas, lassoCtx;
+
+    function initApp() {
       const container = document.getElementById('canvas-container');
 
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x121316);
+      scene.background = new THREE.Color(0x0f1013);
 
-      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
       camera.position.set(2, 2, 3);
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(window.devicePixelRatio);
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(container.clientWidth, container.clientHeight);
       container.appendChild(renderer.domElement);
 
       controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -486,7 +630,7 @@
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
       scene.add(ambientLight);
 
-      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.75);
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
       dirLight1.position.set(5, 10, 7);
       scene.add(dirLight1);
 
@@ -498,27 +642,27 @@
       grid.position.y = -0.01;
       scene.add(grid);
 
-      // Setup 2D Lasso Drawing Canvas
       lassoCanvas = document.getElementById('lasso-canvas');
       lassoCtx = lassoCanvas.getContext('2d');
       resizeLassoCanvas();
 
-      window.addEventListener('resize', onWindowResize);
-      setupLassoEvents();
-
-      loadModel();
+      setupEventListeners();
+      setupHeartbeat();
+      loadActiveModel();
       animate();
     }
 
     function resizeLassoCanvas() {
-      lassoCanvas.width = window.innerWidth;
-      lassoCanvas.height = window.innerHeight;
+      const v = document.getElementById('viewport-container');
+      lassoCanvas.width = v.clientWidth;
+      lassoCanvas.height = v.clientHeight;
     }
 
     function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
+      const v = document.getElementById('viewport-container');
+      camera.aspect = v.clientWidth / v.clientHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(v.clientWidth, v.clientHeight);
       resizeLassoCanvas();
     }
 
@@ -528,49 +672,56 @@
       renderer.render(scene, camera);
     }
 
-    function switchMode(mode) {
-      currentMode = mode;
-      document.getElementById('tab-planar').classList.toggle('active', mode === 'planar');
-      document.getElementById('tab-lasso').classList.toggle('active', mode === 'lasso');
+    // --- HEARTBEAT & CLEAN EXIT ---
+    function setupHeartbeat() {
+      // Periodic ping every 3 seconds
+      setInterval(() => {
+        fetch('/api/heartbeat').catch(() => {});
+      }, 3000);
 
-      document.getElementById('panel-planar').style.display = mode === 'planar' ? 'block' : 'none';
-      document.getElementById('panel-lasso').style.display = mode === 'lasso' ? 'block' : 'none';
-      document.getElementById('selection-info-row').style.display = mode === 'lasso' ? 'flex' : 'none';
-
-      if (cutPlaneMesh) cutPlaneMesh.visible = (mode === 'planar' && document.getElementById('show-plane').checked);
-      if (mode === 'planar' && isLassoMode) toggleLassoMode(false);
+      // On window close, trigger instant clean exit
+      window.addEventListener('beforeunload', () => {
+        navigator.sendBeacon('/api/shutdown');
+      });
     }
 
-    function loadModel() {
+    // --- 3D MODEL LOADING ---
+    function loadActiveModel(customUrl) {
+      document.getElementById('loading-spinner-overlay').style.display = 'flex';
+      document.getElementById('spinner-text').innerText = 'Loading 3D Model...';
+
+      if (model) scene.remove(model);
+      model = null; primaryMesh = null; selectedFaceIndices.clear(); stagedParts = [];
+
+      const url = customUrl || '/api/model.glb';
       const loader = new THREE.GLTFLoader();
       if (typeof MeshoptDecoder !== 'undefined') {
         loader.setMeshoptDecoder(MeshoptDecoder);
       }
 
-      loader.load('/api/model.glb', function (gltf) {
+      loader.load(url, function (gltf) {
         model = gltf.scene;
         scene.add(model);
 
-        // Find primary mesh
         model.traverse(child => {
           if (child.isMesh && !primaryMesh) {
             primaryMesh = child;
           }
         });
 
-        // Bounding Box
         boundingBox = new THREE.Box3().setFromObject(model);
         const center = new THREE.Vector3();
         boundingBox.getCenter(center);
         const size = new THREE.Vector3();
         boundingBox.getSize(size);
 
-        // Precompute face centers and normals for instant lasso raycasting
+        // Precompute spatial raycasting arrays
         precomputeMeshData(primaryMesh);
 
-        document.getElementById('bounds-size').innerText = 
+        document.getElementById('card-model-name').innerText = "Model Ready";
+        document.getElementById('model-bounds-dim').innerText = 
           `${(size.x * 1000).toFixed(1)} × ${(size.y * 1000).toFixed(1)} × ${(size.z * 1000).toFixed(1)} mm`;
-        document.getElementById('poly-count').innerText = 
+        document.getElementById('model-poly-count').innerText = 
           `${totalFaces.toLocaleString()} faces (${primaryMesh.geometry.attributes.position.count.toLocaleString()} verts)`;
 
         const maxDim = Math.max(size.x, size.y, size.z);
@@ -579,15 +730,17 @@
         controls.update();
 
         createCutPlane(size, center);
-        setCutAxis('X');
+        setPlanarAxis('X');
 
-        document.getElementById('loading-overlay').style.display = 'none';
-      }, undefined, function (error) {
-        console.error('Error loading model:', error);
-        document.getElementById('loading-text').innerText = 'Error loading GLB model';
+        document.getElementById('loading-spinner-overlay').style.display = 'none';
+      }, undefined, function (err) {
+        console.error(err);
+        document.getElementById('spinner-text').innerText = 'Ready (No GLB loaded or drop one)';
+        setTimeout(() => { document.getElementById('loading-spinner-overlay').style.display = 'none'; }, 800);
       });
     }
 
+    // High-performance spatial pre-caching for 60 FPS Lasso Selection
     function precomputeMeshData(mesh) {
       const geom = mesh.geometry;
       const pos = geom.attributes.position;
@@ -598,14 +751,12 @@
       faceNormals = new Float32Array(totalFaces * 3);
 
       const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
-      const cb = new THREE.Vector3(), ab = new THREE.Vector3(), normal = new THREE.Vector3();
+      const cb = new THREE.Vector3(), ab = new THREE.Vector3();
 
       for (let i = 0; i < totalFaces; i++) {
         let a, b, c;
         if (index) {
-          a = index.getX(i * 3);
-          b = index.getX(i * 3 + 1);
-          c = index.getX(i * 3 + 2);
+          a = index.getX(i * 3); b = index.getX(i * 3 + 1); c = index.getX(i * 3 + 2);
         } else {
           a = i * 3; b = i * 3 + 1; c = i * 3 + 2;
         }
@@ -614,16 +765,10 @@
         pB.fromBufferAttribute(pos, b);
         pC.fromBufferAttribute(pos, c);
 
-        // Center
-        const cx = (pA.x + pB.x + pC.x) / 3.0;
-        const cy = (pA.y + pB.y + pC.y) / 3.0;
-        const cz = (pA.z + pB.z + pC.z) / 3.0;
+        faceCenters[i * 3] = (pA.x + pB.x + pC.x) / 3.0;
+        faceCenters[i * 3 + 1] = (pA.y + pB.y + pC.y) / 3.0;
+        faceCenters[i * 3 + 2] = (pA.z + pB.z + pC.z) / 3.0;
 
-        faceCenters[i * 3] = cx;
-        faceCenters[i * 3 + 1] = cy;
-        faceCenters[i * 3 + 2] = cz;
-
-        // Normal
         cb.subVectors(pC, pB);
         ab.subVectors(pA, pB);
         cb.cross(ab).normalize();
@@ -633,61 +778,105 @@
         faceNormals[i * 3 + 2] = cb.z;
       }
 
-      // Ensure geometry has color attribute so we can tint parts live
       if (!geom.attributes.color) {
-        const colArr = new Float32Array(pos.count * 3).fill(0.8);
-        geom.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
+        geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(0.85), 3));
       }
       originalVertexColors = geom.attributes.color.clone();
       mesh.material.vertexColors = true;
       mesh.material.needsUpdate = true;
     }
 
-    // --- LASSO SELECTION LOGIC ---
+    // --- EVENT LISTENERS (DRAG & DROP, LASSO, SHORTCUTS) ---
+    function setupEventListeners() {
+      window.addEventListener('resize', onWindowResize);
 
-    function setupLassoEvents() {
+      // Drag and drop GLB files into viewport
+      const v = document.getElementById('viewport-container');
+      const dropOverlay = document.getElementById('drop-overlay');
+
+      v.addEventListener('dragover', (e) => { e.preventDefault(); dropOverlay.style.display = 'flex'; });
+      v.addEventListener('dragleave', () => { dropOverlay.style.display = 'none'; });
+      v.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropOverlay.style.display = 'none';
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          const file = e.dataTransfer.files[0];
+          uploadAndLoadModel(file);
+        }
+      });
+
+      // Shift key shortcut for Lasso
       window.addEventListener('keydown', (e) => {
-        if (e.key === 'Shift' && !isLassoMode && currentMode === 'lasso') {
-          toggleLassoMode(true);
+        if (e.key === 'Shift' && currentSplitMode === 'lasso' && !isLassoMode) {
+          toggleLassoDraw(true);
         }
       });
       window.addEventListener('keyup', (e) => {
         if (e.key === 'Shift' && isLassoMode) {
-          toggleLassoMode(false);
+          toggleLassoDraw(false);
         }
       });
 
+      // Lasso canvas drawing
       lassoCanvas.addEventListener('mousedown', (e) => {
         if (!isLassoMode) return;
         isDrawingLasso = true;
-        lassoPoints = [[e.clientX, e.clientY]];
+        const rect = lassoCanvas.getBoundingClientRect();
+        lassoPoints = [[e.clientX - rect.left, e.clientY - rect.top]];
         drawLassoPath();
       });
 
       window.addEventListener('mousemove', (e) => {
         if (!isDrawingLasso) return;
-        lassoPoints.push([e.clientX, e.clientY]);
+        const rect = lassoCanvas.getBoundingClientRect();
+        lassoPoints.push([e.clientX - rect.left, e.clientY - rect.top]);
         drawLassoPath();
       });
 
       window.addEventListener('mouseup', () => {
         if (!isDrawingLasso) return;
         isDrawingLasso = false;
-        if (lassoPoints.length > 3) {
-          executeLassoSelection();
-        }
+        if (lassoPoints.length > 3) executeLassoSelection();
         lassoCtx.clearRect(0, 0, lassoCanvas.width, lassoCanvas.height);
         lassoPoints = [];
       });
     }
 
-    function toggleLassoMode(forceState) {
+    function uploadAndLoadModel(file) {
+      const formData = new FormData();
+      formData.append('model', file);
+      document.getElementById('loading-spinner-overlay').style.display = 'flex';
+      document.getElementById('spinner-text').innerText = `Uploading ${file.name}...`;
+
+      fetch('/api/upload', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            loadActiveModel();
+          } else {
+            alert('Upload failed: ' + res.error);
+          }
+        })
+        .catch(err => alert('Upload error: ' + err));
+    }
+
+    function triggerOpenFileDialog() {
+      document.getElementById('file-picker').click();
+    }
+    function onFilePicked(e) {
+      if (e.target.files && e.target.files[0]) {
+        uploadAndLoadModel(e.target.files[0]);
+      }
+    }
+
+    // --- LASSO SELECTION ENGINE (AABB PRE-CULLING + RAYCASTING) ---
+    function toggleLassoDraw(forceState) {
       if (forceState !== undefined) isLassoMode = forceState;
       else isLassoMode = !isLassoMode;
 
-      const btn = document.getElementById('btn-toggle-lasso');
+      const btn = document.getElementById('btn-draw-lasso');
       btn.classList.toggle('active', isLassoMode);
-      btn.innerText = isLassoMode ? '🔴 Drawing Mode (Click & Drag)' : '🖊 Draw Selection Lasso';
+      btn.innerText = isLassoMode ? '🔴 Drawing Mode (Drag Loop)' : '🖊 Draw Selection Lasso (Shift)';
 
       controls.enabled = !isLassoMode;
       lassoCanvas.classList.toggle('drawing', isLassoMode);
@@ -708,21 +897,8 @@
       lassoCtx.lineWidth = 2.5;
       lassoCtx.setLineDash([5, 4]);
       lassoCtx.stroke();
-
       lassoCtx.fillStyle = 'rgba(56, 189, 248, 0.18)';
       lassoCtx.fill();
-    }
-
-    // Fast Point in Polygon
-    function pointInPolygon(x, y, polygon) {
-      let inside = false;
-      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const xi = polygon[i][0], yi = polygon[i][1];
-        const xj = polygon[j][0], yj = polygon[j][1];
-        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-        if (intersect) inside = !inside;
-      }
-      return inside;
     }
 
     function executeLassoSelection() {
@@ -737,24 +913,30 @@
       }
 
       const frontOnly = document.getElementById('lasso-front-only').checked;
-      const colorSnap = document.getElementById('lasso-color-snap').checked;
-
       const screenPos = new THREE.Vector3();
       const faceWorldNormal = new THREE.Vector3();
       const camPos = camera.position;
       const worldMatrix = primaryMesh.matrixWorld;
 
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      const w = lassoCanvas.width;
+      const h = lassoCanvas.height;
 
-      let newlySelected = 0;
+      // Fast Point in Polygon
+      function inPoly(x, y) {
+        let inside = false;
+        for (let i = 0, j = lassoPoints.length - 1; i < lassoPoints.length; j = i++) {
+          const xi = lassoPoints[i][0], yi = lassoPoints[i][1];
+          const xj = lassoPoints[j][0], yj = lassoPoints[j][1];
+          const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
 
       for (let i = 0; i < totalFaces; i++) {
-        // Center in local space
         screenPos.set(faceCenters[i * 3], faceCenters[i * 3 + 1], faceCenters[i * 3 + 2]);
         screenPos.applyMatrix4(worldMatrix);
 
-        // Front-Facing Test
         if (frontOnly) {
           faceWorldNormal.set(faceNormals[i * 3], faceNormals[i * 3 + 1], faceNormals[i * 3 + 2]);
           faceWorldNormal.transformDirection(worldMatrix);
@@ -762,67 +944,55 @@
           if (faceWorldNormal.dot(viewDir) <= 0) continue;
         }
 
-        // Project to 2D screen
         screenPos.project(camera);
         const sx = ((screenPos.x + 1) * w) / 2.0;
         const sy = ((-screenPos.y + 1) * h) / 2.0;
 
-        // Fast AABB check
+        // Instant AABB screen reject
         if (sx < minX || sx > maxX || sy < minY || sy > maxY) continue;
 
-        // Accurate point in polygon test
-        if (pointInPolygon(sx, sy, lassoPoints)) {
+        if (inPoly(sx, sy)) {
           selectedFaceIndices.add(i);
-          newlySelected++;
         }
       }
 
-      updateSelectionDisplay();
+      renderPartTints();
     }
 
     function clearSelection() {
       selectedFaceIndices.clear();
-      updateSelectionDisplay();
+      renderPartTints();
     }
 
     function invertSelection() {
-      const inverted = new Set();
+      const inv = new Set();
       for (let i = 0; i < totalFaces; i++) {
-        if (!selectedFaceIndices.has(i)) inverted.add(i);
+        if (!selectedFaceIndices.has(i)) inv.add(i);
       }
-      selectedFaceIndices = inverted;
-      updateSelectionDisplay();
+      selectedFaceIndices = inv;
+      renderPartTints();
     }
 
-    function updateSelectionDisplay() {
-      document.getElementById('selected-count').innerText = selectedFaceIndices.size.toLocaleString();
-      renderPartColorsOnMesh();
-    }
-
-    // --- MULTI-PART STAGING ---
-
+    // --- MULTI-PART STAGING DECK ---
     function createPartFromSelection() {
       if (selectedFaceIndices.size === 0) {
-        alert("Please select some faces with the lasso first!");
+        alert("Please draw a lasso over the model first!");
         return;
       }
-
-      const partIndex = stagedParts.length;
-      const palette = PART_PALETTE[partIndex % PART_PALETTE.length];
-      const partName = `Part_${partIndex + 1}`;
-
-      const newPart = {
+      const partIdx = stagedParts.length;
+      const pal = PART_PALETTE[partIdx % PART_PALETTE.length];
+      const part = {
         id: Date.now(),
-        name: partName,
-        hex: palette.hex,
-        rgb: palette.rgb,
+        name: `Part_${partIdx + 1}`,
+        hex: pal.hex,
+        rgb: pal.rgb,
         faces: new Set(selectedFaceIndices)
       };
-
-      stagedParts.push(newPart);
+      stagedParts.push(part);
       selectedFaceIndices.clear();
-      refreshPartsUI();
-      renderPartColorsOnMesh();
+      refreshPartsDeckUI();
+      renderPartTints();
+      updateMainButtonLabel();
     }
 
     function autoAssignRemaining() {
@@ -833,135 +1003,105 @@
       for (let i = 0; i < totalFaces; i++) {
         if (!assigned.has(i)) unassigned.push(i);
       }
-
       if (unassigned.length === 0) {
         alert("All faces are already assigned to parts!");
         return;
       }
-
-      const partIndex = stagedParts.length;
-      const palette = PART_PALETTE[partIndex % PART_PALETTE.length];
-      const newPart = {
+      const partIdx = stagedParts.length;
+      const pal = PART_PALETTE[partIdx % PART_PALETTE.length];
+      stagedParts.push({
         id: Date.now(),
-        name: `Part_${partIndex + 1}_Remaining`,
-        hex: palette.hex,
-        rgb: palette.rgb,
+        name: `Part_${partIdx + 1}_Remaining`,
+        hex: pal.hex,
+        rgb: pal.rgb,
         faces: new Set(unassigned)
-      };
-
-      stagedParts.push(newPart);
-      refreshPartsUI();
-      renderPartColorsOnMesh();
+      });
+      refreshPartsDeckUI();
+      renderPartTints();
+      updateMainButtonLabel();
     }
 
     function deletePart(id) {
       stagedParts = stagedParts.filter(p => p.id !== id);
-      refreshPartsUI();
-      renderPartColorsOnMesh();
+      refreshPartsDeckUI();
+      renderPartTints();
+      updateMainButtonLabel();
     }
 
-    function refreshPartsUI() {
-      const container = document.getElementById('parts-container');
-      container.innerHTML = '';
-
-      stagedParts.forEach((part, idx) => {
-        const card = document.createElement('div');
-        card.className = 'part-card';
-
-        card.innerHTML = `
-          <div style="display: flex; align-items: center;">
-            <span class="part-color-dot" style="background: ${part.hex};"></span>
-            <input class="part-name-input" value="${part.name}" onchange="updatePartName(${part.id}, this.value)">
-          </div>
-          <span class="part-faces-count">${part.faces.size.toLocaleString()} faces</span>
-          <button class="btn-del-part" onclick="deletePart(${part.id})">✕</button>
+    function refreshPartsDeckUI() {
+      const box = document.getElementById('staged-parts-box');
+      box.innerHTML = '';
+      stagedParts.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'part-item';
+        item.innerHTML = `
+          <div class="part-dot" style="background: ${p.hex};"></div>
+          <input class="part-name" value="${p.name}" onchange="updatePartName(${p.id}, this.value)">
+          <span class="part-count">${p.faces.size.toLocaleString()} faces</span>
+          <button class="part-del" onclick="deletePart(${p.id})">✕</button>
         `;
-        container.appendChild(card);
+        box.appendChild(item);
       });
-
-      document.getElementById('btn-export-staged').disabled = (stagedParts.length === 0);
     }
 
-    function updatePartName(id, newName) {
+    function updatePartName(id, val) {
       const p = stagedParts.find(x => x.id === id);
-      if (p) p.name = newName.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+      if (p) p.name = val.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
     }
 
-    function renderPartColorsOnMesh() {
+    function renderPartTints() {
       if (!primaryMesh) return;
       const geom = primaryMesh.geometry;
-      const colorAttr = geom.attributes.color;
+      const colAttr = geom.attributes.color;
       const index = geom.index;
 
-      // Reset to original colors
-      colorAttr.copy(originalVertexColors);
-
-      // Create lookup map of face -> color tint
+      colAttr.copy(originalVertexColors);
       const faceTints = new Map();
 
-      // Assigned staged parts
       stagedParts.forEach(part => {
         const [pr, pg, pb] = [part.rgb[0] / 255.0, part.rgb[1] / 255.0, part.rgb[2] / 255.0];
-        part.faces.forEach(fIdx => faceTints.set(fIdx, [pr, pg, pb]));
+        part.faces.forEach(f => faceTints.set(f, [pr, pg, pb]));
       });
 
-      // Active selection (Golden yellow #fbbf24)
-      selectedFaceIndices.forEach(fIdx => {
-        faceTints.set(fIdx, [0.98, 0.75, 0.14]);
-      });
+      selectedFaceIndices.forEach(f => faceTints.set(f, [0.98, 0.75, 0.14]));
 
-      // Tint vertex colors
       faceTints.forEach(([tr, tg, tb], fIdx) => {
         let v0, v1, v2;
         if (index) {
-          v0 = index.getX(fIdx * 3);
-          v1 = index.getX(fIdx * 3 + 1);
-          v2 = index.getX(fIdx * 3 + 2);
+          v0 = index.getX(fIdx * 3); v1 = index.getX(fIdx * 3 + 1); v2 = index.getX(fIdx * 3 + 2);
         } else {
           v0 = fIdx * 3; v1 = fIdx * 3 + 1; v2 = fIdx * 3 + 2;
         }
 
         [v0, v1, v2].forEach(v => {
-          const r = colorAttr.getX(v);
-          const g = colorAttr.getY(v);
-          const b = colorAttr.getZ(v);
-          // 40% original texture + 60% tint
-          colorAttr.setXYZ(v, r * 0.4 + tr * 0.6, g * 0.4 + tg * 0.6, b * 0.4 + tb * 0.6);
+          const r = colAttr.getX(v), g = colAttr.getY(v), b = colAttr.getZ(v);
+          colAttr.setXYZ(v, r * 0.4 + tr * 0.6, g * 0.4 + tg * 0.6, b * 0.4 + tb * 0.6);
         });
       });
-
-      colorAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
     }
 
-    // --- PLANAR CUT CODE ---
-
+    // --- PLANAR CUT CONTROLS ---
     function createCutPlane(size, center) {
       const planeSize = Math.max(size.x, size.y, size.z) * 1.6;
       const geom = new THREE.PlaneGeometry(planeSize, planeSize);
       const mat = new THREE.MeshBasicMaterial({
-        color: 0x38bdf8,
-        transparent: true,
-        opacity: 0.35,
-        side: THREE.DoubleSide,
-        depthWrite: false
+        color: 0x38bdf8, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false
       });
       cutPlaneMesh = new THREE.Mesh(geom, mat);
       const wireGeom = new THREE.EdgesGeometry(geom);
-      const wireMat = new THREE.LineBasicMaterial({ color: 0x0284c7, linewidth: 2 });
-      cutPlaneMesh.add(new THREE.LineSegments(wireGeom, wireMat));
+      cutPlaneMesh.add(new THREE.LineSegments(wireGeom, new THREE.LineBasicMaterial({ color: 0x0284c7, linewidth: 2 })));
+      cutPlaneMesh.visible = (currentSplitMode === 'planar');
       scene.add(cutPlaneMesh);
     }
 
-    function setCutAxis(axis) {
-      activeAxis = axis;
-      document.getElementById('btn-axis-x').classList.toggle('active', axis === 'X');
-      document.getElementById('btn-axis-y').classList.toggle('active', axis === 'Y');
-      document.getElementById('btn-axis-z').classList.toggle('active', axis === 'Z');
+    function setPlanarAxis(axis) {
+      currentPlaneAxis = axis;
+      document.getElementById('btn-plane-x').classList.toggle('active', axis === 'X');
+      document.getElementById('btn-plane-y').classList.toggle('active', axis === 'Y');
+      document.getElementById('btn-plane-z').classList.toggle('active', axis === 'Z');
 
-      const slider = document.getElementById('cut-slider');
-      const title = document.getElementById('slider-title');
-      if (!boundingBox) return;
-
+      if (!boundingBox || !cutPlaneMesh) return;
       let minVal, maxVal;
       if (axis === 'X') {
         minVal = boundingBox.min.x; maxVal = boundingBox.max.x;
@@ -974,120 +1114,199 @@
         cutPlaneMesh.rotation.set(0, 0, 0);
       }
 
-      const midVal = (minVal + maxVal) / 2.0;
+      const slider = document.getElementById('plane-slider');
       slider.min = minVal; slider.max = maxVal;
       slider.step = (maxVal - minVal) / 200.0;
-      slider.value = midVal;
-      title.innerText = `Plane Position (${axis}):`;
-      onSliderMove(midVal);
+      const mid = (minVal + maxVal) / 2.0;
+      slider.value = mid;
+      onPlaneSlider(mid);
     }
 
-    function onSliderMove(val) {
-      currentCutCoord = parseFloat(val);
-      document.getElementById('slider-val').innerText = `${currentCutCoord.toFixed(3)}`;
+    function onPlaneSlider(val) {
+      currentPlaneCoord = parseFloat(val);
+      document.getElementById('plane-coord-lbl').innerText = `${currentPlaneCoord.toFixed(3)} mm`;
       if (!cutPlaneMesh || !boundingBox) return;
-
       const center = new THREE.Vector3();
       boundingBox.getCenter(center);
-      if (activeAxis === 'X') cutPlaneMesh.position.set(currentCutCoord, center.y, center.z);
-      else if (activeAxis === 'Y') cutPlaneMesh.position.set(center.x, currentCutCoord, center.z);
-      else cutPlaneMesh.position.set(center.x, center.y, currentCutCoord);
+      if (currentPlaneAxis === 'X') cutPlaneMesh.position.set(currentPlaneCoord, center.y, center.z);
+      else if (currentPlaneAxis === 'Y') cutPlaneMesh.position.set(center.x, currentPlaneCoord, center.z);
+      else cutPlaneMesh.position.set(center.x, center.y, currentPlaneCoord);
     }
 
     function centerPlane() {
       if (!boundingBox) return;
-      let mid = (activeAxis === 'X') ? (boundingBox.min.x + boundingBox.max.x) / 2.0 :
-                (activeAxis === 'Y') ? (boundingBox.min.y + boundingBox.max.y) / 2.0 :
+      let mid = (currentPlaneAxis === 'X') ? (boundingBox.min.x + boundingBox.max.x) / 2.0 :
+                (currentPlaneAxis === 'Y') ? (boundingBox.min.y + boundingBox.max.y) / 2.0 :
                 (boundingBox.min.z + boundingBox.max.z) / 2.0;
-      document.getElementById('cut-slider').value = mid;
-      onSliderMove(mid);
+      document.getElementById('plane-slider').value = mid;
+      onPlaneSlider(mid);
     }
 
-    function togglePlane(visible) {
-      if (cutPlaneMesh) cutPlaneMesh.visible = visible;
+    // --- TAB SWITCHER & SETTINGS ---
+    function setSplitMode(mode) {
+      currentSplitMode = mode;
+      document.getElementById('tab-split-none').classList.toggle('active', mode === 'none');
+      document.getElementById('tab-split-planar').classList.toggle('active', mode === 'planar');
+      document.getElementById('tab-split-lasso').classList.toggle('active', mode === 'lasso');
+
+      document.getElementById('deck-planar').style.display = mode === 'planar' ? 'block' : 'none';
+      document.getElementById('deck-lasso').style.display = mode === 'lasso' ? 'block' : 'none';
+
+      if (cutPlaneMesh) cutPlaneMesh.visible = (mode === 'planar');
+      if (mode !== 'lasso' && isLassoMode) toggleLassoDraw(false);
+
+      updateMainButtonLabel();
     }
 
-    // --- TRIGGER EXPORTS ---
+    function setTexRes(val) {
+      currentTexRes = val;
+      const pills = document.getElementById('tex-res-pills').children;
+      for (let p of pills) p.classList.remove('active');
+      event.target.classList.add('active');
+    }
 
-    function triggerPlanarSplit() {
-      const btn = document.getElementById('btn-split-planar');
-      const status = document.getElementById('split-status');
-      const capCut = document.getElementById('cap-cut-planar').checked;
+    function toggleDecimate(enabled) {
+      isDecimateEnabled = enabled;
+      document.getElementById('decimate-slider').disabled = !enabled;
+    }
+
+    function onDecimateSlider(val) {
+      currentDecimateCount = parseInt(val);
+      document.getElementById('decimate-val-lbl').innerText = `${currentDecimateCount.toLocaleString()} faces`;
+    }
+
+    function setDecimatePreset(val) {
+      currentDecimateCount = val;
+      document.getElementById('decimate-slider').value = val;
+      document.getElementById('decimate-val-lbl').innerText = `${val.toLocaleString()} faces`;
+    }
+
+    function updateMainButtonLabel() {
+      const btn = document.getElementById('btn-export-all');
+      if (currentSplitMode === 'none') {
+        btn.innerText = '⚡ CONVERT FOR 3D PRINTING';
+      } else if (currentSplitMode === 'planar') {
+        btn.innerText = '✂ SPLIT & EXPORT 2 PARTS';
+      } else if (currentSplitMode === 'lasso') {
+        const count = stagedParts.length;
+        btn.innerText = count > 0 ? `🚀 EXPORT ${count} STAGED PARTS` : '🖊 DRAW & STAGE PARTS FIRST';
+      }
+    }
+
+    function resetCamera() {
+      if (!boundingBox) return;
+      const center = new THREE.Vector3(); boundingBox.getCenter(center);
+      const size = new THREE.Vector3(); boundingBox.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      camera.position.set(center.x + maxDim * 1.5, center.y + maxDim * 1.2, center.z + maxDim * 1.8);
+      controls.target.copy(center);
+      controls.update();
+    }
+
+    function toggleWireframe() {
+      if (primaryMesh) {
+        primaryMesh.material.wireframe = !primaryMesh.material.wireframe;
+      }
+    }
+
+    // --- EXECUTE CONVERSION / EXPORT ---
+    function executeExport() {
+      const btn = document.getElementById('btn-export-all');
+      const progressFill = document.getElementById('progress-fill');
+      const statusLbl = document.getElementById('status-label');
 
       btn.disabled = true;
-      btn.innerText = '⏳ Bisecting & Exporting...';
-      status.innerText = 'Blender background engine bisecting mesh...';
+      progressFill.style.width = '15%';
+      statusLbl.innerText = 'Starting background processing...';
 
-      fetch('/api/split', {
+      const fmtObj = document.getElementById('chk-fmt-obj').checked;
+      const fmt3mf = document.getElementById('chk-fmt-3mf').checked;
+      let fmt = 'both';
+      if (fmtObj && !fmt3mf) fmt = 'obj';
+      else if (!fmtObj && fmt3mf) fmt = '3mf';
+
+      const capHoles = document.getElementById('chk-cap-holes').checked;
+      const groundZ = document.getElementById('chk-ground-z').checked;
+
+      const payload = {
+        texture_res: currentTexRes,
+        target_triangles: isDecimateEnabled ? currentDecimateCount : 0,
+        ground_z: groundZ,
+        format: fmt,
+        cap_cut: capHoles,
+        split_mode: currentSplitMode
+      };
+
+      if (currentSplitMode === 'planar') {
+        payload.split_axis = currentPlaneAxis.toLowerCase();
+        payload.split_coord = currentPlaneCoord;
+      } else if (currentSplitMode === 'lasso') {
+        if (stagedParts.length === 0) {
+          alert('Please stage at least one part before exporting!');
+          btn.disabled = false;
+          progressFill.style.width = '0%';
+          statusLbl.innerText = 'Ready';
+          return;
+        }
+        payload.parts = {};
+        stagedParts.forEach(p => {
+          payload.parts[p.name] = Array.from(p.faces);
+        });
+      }
+
+      fetch('/api/convert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          axis: activeAxis.toLowerCase(),
-          coord: currentCutCoord,
-          cap_cut: capCut
-        })
+        body: JSON.stringify(payload)
       })
       .then(r => r.json())
       .then(res => {
         btn.disabled = false;
-        btn.innerText = '✂ Split & Export 2 Parts';
         if (res.success) {
-          status.innerHTML = `<span style="color: #4ade80; font-weight: bold;">✔ Done! Parts exported to:</span><br>${res.output_folder}`;
-          alert(`Successfully split model into 2 parts!\n\nExported to:\n${res.output_folder}`);
+          progressFill.style.width = '100%';
+          statusLbl.innerHTML = `<span style="color: #4ade80; font-weight: bold;">✔ Done!</span> <a href="#" style="color: #38bdf8;" onclick="openOutputDir('${encodeURIComponent(res.output_folder)}')">Open Output Folder</a>`;
+          alert(`Successfully exported for 3D printing!\n\nSaved to:\n${res.output_folder}`);
         } else {
-          status.innerHTML = `<span style="color: #f87171;">Error: ${res.error || 'Split failed'}</span>`;
+          progressFill.style.width = '0%';
+          statusLbl.innerHTML = `<span style="color: #f87171;">Failed: ${res.error || 'Conversion error'}</span>`;
         }
       })
       .catch(err => {
         btn.disabled = false;
-        btn.innerText = '✂ Split & Export 2 Parts';
-        status.innerHTML = `<span style="color: #f87171;">Network Error: ${err}</span>`;
+        progressFill.style.width = '0%';
+        statusLbl.innerHTML = `<span style="color: #f87171;">Network Error: ${err}</span>`;
       });
     }
 
-    function triggerLassoSplit() {
-      if (stagedParts.length === 0) return;
-      const btn = document.getElementById('btn-export-staged');
-      const status = document.getElementById('split-status');
-      const capCut = document.getElementById('cap-cut-lasso').checked;
-
-      btn.disabled = true;
-      btn.innerText = '⏳ Separating & Capping Parts...';
-      status.innerText = `Blender headless engine processing ${stagedParts.length} parts...`;
-
-      // Build payload: { parts: { "Part_1": [face_indices], "Part_2": [...] }, cap_cut: true }
-      const partsPayload = {};
-      stagedParts.forEach(p => {
-        partsPayload[p.name] = Array.from(p.faces);
-      });
-
-      fetch('/api/split_parts', {
+    function openOutputDir(folder) {
+      fetch('/api/open_folder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          parts: partsPayload,
-          cap_cut: capCut
-        })
-      })
-      .then(r => r.json())
-      .then(res => {
-        btn.disabled = false;
-        btn.innerText = '🚀 Export All Staged Parts';
-        if (res.success) {
-          status.innerHTML = `<span style="color: #4ade80; font-weight: bold;">✔ Exported ${stagedParts.length} watertight parts to:</span><br>${res.output_folder}`;
-          alert(`Successfully exported ${stagedParts.length} staged parts!\n\nLocation:\n${res.output_folder}`);
-        } else {
-          status.innerHTML = `<span style="color: #f87171;">Error: ${res.error || 'Export failed'}</span>`;
-        }
-      })
-      .catch(err => {
-        btn.disabled = false;
-        btn.innerText = '🚀 Export All Staged Parts';
-        status.innerHTML = `<span style="color: #f87171;">Network Error: ${err}</span>`;
+        body: JSON.stringify({ folder: decodeURIComponent(folder) })
       });
     }
 
-    window.onload = init;
+    function openSettingsModal() {
+      fetch('/api/config')
+        .then(r => r.json())
+        .then(cfg => {
+          document.getElementById('cfg-blender-input').value = cfg.blender_path || '';
+          document.getElementById('settings-modal').style.display = 'flex';
+        });
+    }
+    function closeSettingsModal() {
+      document.getElementById('settings-modal').style.display = 'none';
+    }
+    function saveConfigFromModal() {
+      const bPath = document.getElementById('cfg-blender-input').value.trim();
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blender_path: bPath })
+      }).then(() => closeSettingsModal());
+    }
+
+    window.onload = initApp;
   </script>
 </body>
 </html>

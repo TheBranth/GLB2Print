@@ -1,29 +1,45 @@
 """
-server.py - Local server and viewer launcher for 3D visual representation,
-planar cut, and interactive multi-part lasso splitting.
-Supports pywebview (native window) with fallback to default web browser.
+server.py - Local server coordinator for GLB2Print's unified single-page architecture.
+Handles WebGL model streaming, Blender conversions, multi-part lasso splitting,
+and clean lifecycle termination.
 """
 
 import os
 import sys
 import json
+import time
 import socket
 import tempfile
 import threading
-import webbrowser
+import subprocess
+import platform
+import cgi
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 from engine.processor import ConversionJob
+from config import load_config, save_config
 
-class ModelViewerServer:
-    def __init__(self, glb_path: str, cfg: dict):
-        self.glb_path = os.path.abspath(glb_path)
-        self.cfg = cfg
+class UnifiedAppServer:
+    def __init__(self, initial_glb: str = ""):
+        self.cfg = load_config()
+        self.glb_path = os.path.abspath(initial_glb) if (initial_glb and os.path.isfile(initial_glb)) else self._discover_initial_glb()
         self.viewer_dir = Path(__file__).resolve().parent
         self.port = self._find_free_port()
         self.httpd = None
         self.thread = None
+        self.last_heartbeat = time.time()
+        self.is_running = True
+
+    def _discover_initial_glb(self):
+        # Look for badger.glb or any .glb in workspace root
+        root = Path(__file__).resolve().parent.parent
+        badger = root / "badger.glb"
+        if badger.is_file():
+            return str(badger)
+        for f in root.glob("*.glb"):
+            return str(f)
+        return ""
 
     def _find_free_port(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -35,7 +51,7 @@ class ModelViewerServer:
     def start(self):
         parent_self = self
 
-        class ViewerHandler(SimpleHTTPRequestHandler):
+        class UnifiedHandler(SimpleHTTPRequestHandler):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=str(parent_self.viewer_dir), **kwargs)
 
@@ -43,12 +59,29 @@ class ModelViewerServer:
                 pass
 
             def do_GET(self):
+                parent_self.last_heartbeat = time.time()
+
                 if self.path == "/" or self.path == "/index.html":
                     self.path = "/index.html"
                     return super().do_GET()
+
+                elif self.path == "/api/heartbeat":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.end_headers()
+                    self.wfile.write(b"OK")
+                    return
+
+                elif self.path == "/api/config":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(parent_self.cfg).encode("utf-8"))
+                    return
+
                 elif self.path == "/api/model.glb":
-                    if not os.path.isfile(parent_self.glb_path):
-                        self.send_error(404, "GLB file not found")
+                    if not parent_self.glb_path or not os.path.isfile(parent_self.glb_path):
+                        self.send_error(404, "No active GLB model found")
                         return
                     self.send_response(200)
                     self.send_header("Content-Type", "model/gltf-binary")
@@ -59,40 +92,110 @@ class ModelViewerServer:
                         while chunk := f.read(65536):
                             self.wfile.write(chunk)
                     return
+
                 return super().do_GET()
 
             def do_POST(self):
-                # 1. Planar Cut API
-                if self.path == "/api/split":
-                    content_length = int(self.headers.get("Content-Length", 0))
-                    body = self.rfile.read(content_length).decode("utf-8")
-                    data = json.loads(body)
+                parent_self.last_heartbeat = time.time()
 
-                    axis = data.get("axis", "x")
-                    coord = float(data.get("coord", 0.0))
-                    cap_cut = bool(data.get("cap_cut", True))
+                if self.path == "/api/shutdown":
+                    self.send_response(200)
+                    self.end_headers()
+                    parent_self.stop()
+                    return
+
+                elif self.path == "/api/open_folder":
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                    folder = data.get("folder", "")
+                    if folder and os.path.isdir(folder):
+                        if platform.system() == "Windows":
+                            os.startfile(folder)
+                        elif platform.system() == "Darwin":
+                            subprocess.Popen(["open", folder])
+                        else:
+                            subprocess.Popen(["xdg-open", folder])
+                    self.send_response(200)
+                    self.end_headers()
+                    return
+
+                elif self.path == "/api/config":
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                    parent_self.cfg.update(data)
+                    save_config(parent_self.cfg)
+                    self.send_response(200)
+                    self.end_headers()
+                    return
+
+                elif self.path == "/api/upload":
+                    # Handle multipart/form-data upload from drag & drop
+                    ctype, pdict = cgi.parse_header(self.headers.get('content-type'))
+                    if ctype == 'multipart/form-data':
+                        pdict['boundary'] = bytes(pdict['boundary'], "utf-8")
+                        fields = cgi.parse_multipart(self.rfile, pdict)
+                        file_data = fields.get('model', [None])[0]
+                        if file_data:
+                            temp_dir = tempfile.gettempdir()
+                            dest = os.path.join(temp_dir, f"uploaded_{int(time.time())}.glb")
+                            with open(dest, "wb") as f:
+                                f.write(file_data)
+                            parent_self.glb_path = dest
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.end_headers()
+                            self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
+                            return
+
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+
+                elif self.path == "/api/convert":
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    data = json.loads(self.rfile.read(content_length).decode("utf-8"))
 
                     p = Path(parent_self.glb_path)
                     out_dir = p.parent
                     stem = p.stem
 
-                    out_obj = str(out_dir / f"{stem}.obj") if parent_self.cfg.get("default_format") in ("obj", "both") else None
-                    out_3mf = str(out_dir / f"{stem}.3mf") if parent_self.cfg.get("default_format") in ("3mf", "both") else None
+                    fmt = data.get("format", "both")
+                    out_obj = str(out_dir / f"{stem}.obj") if fmt in ("obj", "both") else None
+                    out_3mf = str(out_dir / f"{stem}.3mf") if fmt in ("3mf", "both") else None
+
+                    split_mode = data.get("split_mode", "none")
+                    split_axis = data.get("split_axis", "none")
+                    split_coord = float(data.get("split_coord", 0.0))
+                    cap_cut = bool(data.get("cap_cut", True))
+                    parts_data = data.get("parts", None)
+
+                    temp_json = None
+                    if split_mode == "lasso" and parts_data:
+                        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tf:
+                            json.dump(parts_data, tf)
+                            temp_json = tf.name
 
                     job = ConversionJob(
                         input_glb=parent_self.glb_path,
                         output_obj=out_obj,
                         output_3mf=out_3mf,
                         blender_path=parent_self.cfg.get("blender_path"),
-                        texture_res=parent_self.cfg.get("default_texture_res", 1024),
-                        target_triangles=parent_self.cfg.get("default_triangles", 250000),
-                        ground_z=parent_self.cfg.get("ground_z", True),
-                        split_axis=axis,
-                        split_coord=coord,
-                        split_cap=cap_cut
+                        texture_res=int(data.get("texture_res", 1024)),
+                        target_triangles=int(data.get("target_triangles", 250000)),
+                        ground_z=bool(data.get("ground_z", True)),
+                        split_axis=split_axis if split_mode == "planar" else "none",
+                        split_coord=split_coord,
+                        split_cap=cap_cut,
+                        parts_json=temp_json
                     )
 
                     ok = job.run()
+
+                    if temp_json:
+                        try:
+                            os.remove(temp_json)
+                        except Exception:
+                            pass
 
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -104,96 +207,27 @@ class ModelViewerServer:
                     self.wfile.write(json.dumps(resp).encode("utf-8"))
                     return
 
-                # 2. Multi-Part Lasso / Region Split API
-                elif self.path == "/api/split_parts":
-                    content_length = int(self.headers.get("Content-Length", 0))
-                    body = self.rfile.read(content_length).decode("utf-8")
-                    data = json.loads(body)
+                self.send_error(404, "Endpoint not found")
 
-                    parts_dict = data.get("parts", {})
-                    cap_cut = bool(data.get("cap_cut", True))
-
-                    p = Path(parent_self.glb_path)
-                    out_dir = p.parent
-                    stem = p.stem
-
-                    # Write temporary JSON file
-                    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tf:
-                        json.dump(parts_dict, tf)
-                        temp_json_path = tf.name
-
-                    out_obj = str(out_dir / f"{stem}.obj") if parent_self.cfg.get("default_format") in ("obj", "both") else None
-                    out_3mf = str(out_dir / f"{stem}.3mf") if parent_self.cfg.get("default_format") in ("3mf", "both") else None
-
-                    job = ConversionJob(
-                        input_glb=parent_self.glb_path,
-                        output_obj=out_obj,
-                        output_3mf=out_3mf,
-                        blender_path=parent_self.cfg.get("blender_path"),
-                        texture_res=parent_self.cfg.get("default_texture_res", 1024),
-                        target_triangles=parent_self.cfg.get("default_triangles", 250000),
-                        ground_z=parent_self.cfg.get("ground_z", True),
-                        parts_json=temp_json_path,
-                        split_cap=cap_cut
-                    )
-
-                    ok = job.run()
-
-                    try:
-                        os.remove(temp_json_path)
-                    except Exception:
-                        pass
-
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    resp = {
-                        "success": ok,
-                        "output_folder": str(out_dir)
-                    }
-                    self.wfile.write(json.dumps(resp).encode("utf-8"))
-                    return
-
-                self.send_error(404, "Unknown API endpoint")
-
-        self.httpd = ThreadingHTTPServer(('127.0.0.1', self.port), ViewerHandler)
+        self.httpd = ThreadingHTTPServer(('127.0.0.1', self.port), UnifiedHandler)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
+
+        # Watchdog thread for clean termination
+        def watchdog():
+            while self.is_running:
+                time.sleep(2)
+                # If no heartbeat for > 15s, shutdown
+                if time.time() - self.last_heartbeat > 15:
+                    self.stop()
+                    break
+        threading.Thread(target=watchdog, daemon=True).start()
+
         return f"http://127.0.0.1:{self.port}"
 
     def stop(self):
+        self.is_running = False
         if self.httpd:
-            self.httpd.shutdown()
-
-def launch_viewer(glb_path: str, cfg: dict):
-    """
-    Launches the 3D visual viewer with planar cut & lasso tools.
-    Attempts pywebview native window first, falls back to web browser.
-    """
-    server = ModelViewerServer(glb_path, cfg)
-    url = server.start()
-
-    has_webview = False
-    try:
-        import webview
-        has_webview = True
-    except Exception:
-        has_webview = False
-
-    if has_webview:
-        try:
-            window_title = f"GLB2Print — 3D Viewer & Split to Parts [{os.path.basename(glb_path)}]"
-            webview.create_window(window_title, url, width=1220, height=840, min_size=(840, 600))
-            webview.start()
-            server.stop()
-            return
-        except Exception as e:
-            print(f"pywebview start failed, falling back to browser: {e}")
-
-    webbrowser.open(url)
-
-if __name__ == "__main__":
-    test_file = sys.argv[1] if len(sys.argv) > 1 else "badger.glb"
-    from config import load_config
-    cfg = load_config()
-    launch_viewer(test_file, cfg)
+            threading.Thread(target=self.httpd.shutdown).start()
+        # Clean process termination
+        threading.Timer(0.5, lambda: os._exit(0)).start()

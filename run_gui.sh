@@ -3,7 +3,6 @@
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$DIR"
 
-# Determine python command
 if command -v python3 &>/dev/null; then
     PYTHON_CMD="python3"
 elif command -v python &>/dev/null; then
@@ -13,4 +12,4 @@ else
     exit 1
 fi
 
-"$PYTHON_CMD" app_gui.py
+"$PYTHON_CMD" app_gui.py "$@"

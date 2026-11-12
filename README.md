@@ -25,9 +25,12 @@ Before using GLB2Print, ensure you have the following installed:
 
 ## Key Features
 
-* **Interactive Lasso & Region Split ('Split to Parts')**: Draw freehand polygon lassos directly across the 3D model in the viewport. Choose between **Surface/Front-Facing Only** or **Through-Mesh** projection, with optional **Color-Boundary Snapping** to snap selection edges to high-contrast texture borders (like facial stripes or mane boundaries).
+* **Unified Single-Window Experience**: Controls (texture, decimation, staging, export) and the real-time Three.js 3D viewport live together in a single application window (powered by `pywebview` with automatic Chrome/Edge `--app` fallback). No split windows or tab clutter.
+* **Direct Viewport Drag & Drop**: Drag any `.glb` or `.gltf` model straight from your desktop into the 3D viewport to inspect and prep it instantly.
+* **Smooth 60 FPS Viewport Raycasting**: High-performance AABB screen pre-filtering ensures instant freehand lasso selection even on massive 2-million polygon models.
+* **Clean Lifecycle Termination**: Automatically terminates background Python server processes as soon as the window is closed.
+* **Interactive Lasso & Region Split ('Split to Parts')**: Draw freehand polygon lassos directly across the 3D model in the viewport. Choose between **Surface/Front-Facing Only** or **Through-Mesh** projection, with optional **Color-Boundary Snapping** to snap selection edges to high-contrast texture borders.
 * **Multi-Part Staging Deck**: Group selections into multiple custom named parts (`Part_1`, `Part_2`, `Part_3`, etc.) with distinct live color tints in the 3D viewport. Break masks into quadrants, separate horns/ears/manes, and export all watertight parts in a single pass.
-* **3D Visual Representation**: Built-in 3D viewer (powered by Three.js & OrbitControls) to visually inspect loaded GLB models, full-color textures, dimensions, and polygon counts.
 * **Planar Cut Tool**: Flat plane cutting along X, Y, or Z axes with interactive position sliders and live preview.
 * **No More Manual Blender Baking**: Slicers cannot use UV-mapped 2D texture images for multi-color toolpaths. **GLB2Print automates this entire process headlessly in seconds.**
 * **Texture Resizing Before Baking**: Downscale massive 4K textures (e.g. to 1024×1024 or 512×512) prior to sampling to dramatically speed up conversion and reduce memory overhead without any loss in FDM print quality.
@@ -37,23 +40,22 @@ Before using GLB2Print, ensure you have the following installed:
 
 ---
 
-## Quickstart (Desktop GUI)
+## Quickstart (Unified Desktop App)
 
-### 1. Launch the GUI
-* **Windows**: Double-click `run_gui.bat` (or run `python app_gui.py`).
-* **macOS / Linux**: Double-click `run_gui.sh` (or run `python3 app_gui.py`).
+### 1. Launch the App
+* **Windows**: Double-click `run_gui.bat` (or drag any `.glb` file directly onto `run_gui.bat`!).
+* **macOS / Linux**: Double-click `run_gui.sh` (or run `python3 app_gui.py [model.glb]`).
 
-### 2. Steps to Convert & Split
-1. **Select Model**: Click **Browse File** (or **Batch Folder** to convert an entire directory).
-2. **3D Visual Preview & Cut**: Click **👁 3D Visual Preview & Cut Tool** to launch the interactive 3D viewport.
-   * Rotate, zoom, and inspect dimensions.
-   * Select cut axis (`X`, `Y`, or `Z`) and drag the slider to place the cutting plane (e.g. right through the nose or waist).
-   * Click **✂ Split & Export Parts** to produce watertight `_part1` and `_part2` files.
-3. **Texture Resolution**: Choose your maximum texture sampling dimension (`Original`, `2048px`, `1024px`, or `512px`).
-4. **Polygon Decimation**: Pick a preset (`100k Fast Slicing`, `250k Balanced Sweetspot`, `500k High Detail`) or adjust the slider.
-5. **Print Bed Prep**: Check `Auto-ground to print bed (Z = 0)`.
-6. **Export Formats**: Check `OBJ` (vertex colors) and/or `3MF` (color groups).
-7. Click **⚡ CONVERT FOR 3D PRINTING**.
+GLB2Print will open as a native single desktop window (using `pywebview` or Chrome/Edge `--app` mode).
+
+### 2. Using the Unified App
+1. **Load Model**: Drag and drop any `.glb` directly into the 3D viewport, or click **📁 Open Model**.
+2. **Inspect & Segment**:
+   * **Full Model Mode**: Convert and export the entire solid model.
+   * **Planar Cut Mode**: Cut along X, Y, or Z with live plane slider.
+   * **Lasso Split Mode**: Hold `Shift` and drag a loop across the mesh to stage multiple custom parts with live color tints.
+3. **Texture & Decimation**: Adjust pre-bake texture resolution (e.g. `1024px`) and target triangle count (e.g. `250k`).
+4. Click **⚡ CONVERT FOR 3D PRINTING** (or **🚀 EXPORT STAGED PARTS**). Output files are saved in the same directory as the input model.
 
 ---
 
