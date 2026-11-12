@@ -271,23 +271,42 @@ def main():
 
         for part_name, face_indices in parts_dict.items():
             safe_name = part_name.strip().replace(" ", "_")
-            log(f"Extracting part '{safe_name}' ({len(face_indices)} faces)...")
+            log(f"Extracting part '{safe_name}'...")
+
+            keep_set = set()
+            for item in face_indices:
+                if isinstance(item, list) and len(item) == 2:
+                    keep_set.update(range(item[0], item[1] + 1))
+                else:
+                    keep_set.add(item)
+
+            log(f"Part '{safe_name}': {len(keep_set)} faces to retain.")
 
             part_obj = obj.copy()
-            part_obj.data = obj.data.copy()
+            part_mesh_data = obj.data.copy()
+            part_obj.data = part_mesh_data
             bpy.context.collection.objects.link(part_obj)
 
             bm = bmesh.new()
             bm.from_mesh(part_obj.data)
-            keep_set = set(face_indices)
             del_faces = [f for f in bm.faces if f.index not in keep_set]
             bmesh.ops.delete(bm, geom=del_faces, context='FACES')
 
             # Cap boundaries if requested
             if args.split_cap:
-                b_edges = [e for e in bm.edges if e.is_boundary]
-                if b_edges:
-                    bmesh.ops.edgenet_fill(bm, edges=b_edges)
+                try:
+                    b_edges = [e for e in bm.edges if e.is_boundary]
+                    if b_edges:
+                        log(f"Attempting boundary capping on {len(b_edges)} boundary edges for '{safe_name}'...")
+                        res = bmesh.ops.edgenet_fill(bm, edges=b_edges)
+                except Exception as cap_err:
+                    log(f"WARNING: edgenet_fill failed ({cap_err}), attempting holes_fill fallback...")
+                    try:
+                        b_edges2 = [e for e in bm.edges if e.is_boundary]
+                        if b_edges2:
+                            bmesh.ops.holes_fill(bm, edges=b_edges2, sides=0)
+                    except Exception as h_err:
+                        log(f"WARNING: Boundary hole capping skipped for '{safe_name}': {h_err}")
 
             bm.to_mesh(part_obj.data)
             bm.free()
@@ -306,6 +325,11 @@ def main():
             part_3mf_out = split_path(args.output_3mf, safe_name)
 
             export_object(part_obj, part_obj_out, part_3mf_out)
+
+            # Clean up memory immediately
+            bpy.data.objects.remove(part_obj, do_unlink=True)
+            bpy.data.meshes.remove(part_mesh_data, do_unlink=True)
+            log(f"Part '{safe_name}' exported and memory freed.")
 
     # 7. Check if Planar Cut is requested
     elif args.split_axis != "none":
@@ -368,4 +392,10 @@ def main():
     log(f"ALL DONE! Total processing time: {time.time()-t_start:.2f}s")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        log(f"CRITICAL WORKER EXCEPTION: {e}")
+        traceback.print_exc()
+        sys.exit(1)

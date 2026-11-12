@@ -371,10 +371,10 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Modal */
-    #settings-modal {
+    #settings-modal, #logs-modal {
       position: fixed;
       top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.65);
       backdrop-filter: blur(4px);
       z-index: 200;
       display: none;
@@ -388,6 +388,32 @@
       border-radius: 10px;
       padding: 18px;
       box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+    }
+    .modal-box-lg {
+      width: 740px;
+      max-width: 92vw;
+      background: #181920;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 18px 22px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+    }
+    .log-terminal {
+      background: #0b0c0f;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      color: #38bdf8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.75rem;
+      line-height: 1.45;
+      padding: 12px;
+      height: 380px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 12px 0;
     }
     .modal-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 14px; display: flex; justify-content: space-between; }
     .modal-input {
@@ -559,6 +585,7 @@
       <div id="viewport-hud">
         <button class="hud-btn" onclick="resetCamera()">⌖ Reset Camera</button>
         <button class="hud-btn" id="btn-hud-wireframe" onclick="toggleWireframe()">Mesh Wireframe</button>
+        <button class="hud-btn" onclick="openLogsModal()">📋 Logs</button>
       </div>
 
       <div id="viewport-tips">
@@ -599,6 +626,28 @@
       <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
         <button class="btn-file" onclick="closeSettingsModal()">Cancel</button>
         <button class="btn-file" style="background: #2563eb; color: #fff;" onclick="saveConfigFromModal()">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGS / CRASH DIAGNOSTICS MODAL -->
+  <div id="logs-modal">
+    <div class="modal-box-lg">
+      <div class="modal-title">
+        <span>📋 System & Conversion Logs</span>
+        <button style="background: transparent; border: none; color: #fff; cursor: pointer; font-size: 1.1rem;" onclick="closeLogsModal()">✕</button>
+      </div>
+      <div style="font-size: 0.75rem; color: #9ca3af; margin-top: 2px;">
+        Live Blender output, vertex baking logs, and crash diagnostics.
+      </div>
+      <pre class="log-terminal" id="log-terminal-output">Loading logs...</pre>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+        <span id="log-file-path-lbl" style="font-size: 0.72rem; color: #64748b; font-family: monospace; overflow: hidden; text-overflow: ellipsis; max-width: 380px;"></span>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-file" onclick="copyLogsToClipboard()">📋 Copy Log</button>
+          <button class="btn-file" onclick="openLogFileInEditor()">📄 Open File</button>
+          <button class="btn-file" style="background: #2563eb; color: #fff;" onclick="refreshLogs()">🔄 Refresh</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1315,6 +1364,28 @@
       }
     }
 
+    function compressIndicesToRanges(indicesSet) {
+      if (!indicesSet || indicesSet.size === 0) return [];
+      const arr = Array.from(indicesSet).sort((a, b) => a - b);
+      const ranges = [];
+      let start = arr[0];
+      let prev = arr[0];
+      for (let i = 1; i < arr.length; i++) {
+        const cur = arr[i];
+        if (cur === prev + 1) {
+          prev = cur;
+        } else {
+          if (start === prev) ranges.push(start);
+          else ranges.push([start, prev]);
+          start = cur;
+          prev = cur;
+        }
+      }
+      if (start === prev) ranges.push(start);
+      else ranges.push([start, prev]);
+      return ranges;
+    }
+
     // --- EXECUTE CONVERSION / EXPORT ---
     function executeExport() {
       const btn = document.getElementById('btn-export-all');
@@ -1356,7 +1427,7 @@
         }
         payload.parts = {};
         stagedParts.forEach(p => {
-          payload.parts[p.name] = Array.from(p.faces);
+          payload.parts[p.name] = compressIndicesToRanges(p.faces);
         });
       }
 
@@ -1374,13 +1445,15 @@
           alert(`Successfully exported for 3D printing!\n\nSaved to:\n${res.output_folder}`);
         } else {
           progressFill.style.width = '0%';
-          statusLbl.innerHTML = `<span style="color: #f87171;">Failed: ${res.error || 'Conversion error'}</span>`;
+          const errDetail = res.error || 'Conversion error';
+          statusLbl.innerHTML = `<span style="color: #f87171; font-weight: 700;">❌ ${errDetail}</span> &nbsp;<a href="#" style="color: #38bdf8; text-decoration: underline;" onclick="openLogsModal()">View Crash Details</a>`;
+          openLogsModal();
         }
       })
       .catch(err => {
         btn.disabled = false;
         progressFill.style.width = '0%';
-        statusLbl.innerHTML = `<span style="color: #f87171;">Network Error: ${err}</span>`;
+        statusLbl.innerHTML = `<span style="color: #f87171; font-weight: 700;">❌ Network / Server Error: ${err}</span> &nbsp;<a href="#" style="color: #38bdf8; text-decoration: underline;" onclick="openLogsModal()">View Crash Details</a>`;
       });
     }
 
@@ -1410,6 +1483,41 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blender_path: bPath })
       }).then(() => closeSettingsModal());
+    }
+
+    function openLogsModal() {
+      document.getElementById('logs-modal').style.display = 'flex';
+      refreshLogs();
+    }
+    function closeLogsModal() {
+      document.getElementById('logs-modal').style.display = 'none';
+    }
+    function refreshLogs() {
+      const term = document.getElementById('log-terminal-output');
+      term.innerText = 'Fetching latest logs...';
+      fetch('/api/logs')
+        .then(r => r.json())
+        .then(data => {
+          term.innerText = (data.logs && data.logs.length > 0) ? data.logs.join('\n') : 'No logs recorded yet.';
+          term.scrollTop = term.scrollHeight;
+          if (data.log_path) {
+            document.getElementById('log-file-path-lbl').innerText = data.log_path;
+          }
+        })
+        .catch(e => {
+          term.innerText = `Failed to fetch logs: ${e}`;
+        });
+    }
+    function copyLogsToClipboard() {
+      const text = document.getElementById('log-terminal-output').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        alert("Logs copied to clipboard!");
+      }).catch(() => {
+        alert("Select text and press Ctrl+C to copy.");
+      });
+    }
+    function openLogFileInEditor() {
+      fetch('/api/open_log', { method: 'POST' });
     }
 
     window.onload = initApp;

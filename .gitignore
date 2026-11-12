@@ -12,6 +12,7 @@
 
 # Local configuration
 glb2print_config.json
+*.log
 
 # Python caches and bytecode
 __pycache__/
