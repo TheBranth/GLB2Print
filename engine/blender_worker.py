@@ -115,9 +115,21 @@ def export_3mf(filepath, mesh, loop_colors):
 
     log(f"Exported 3MF: {os.path.basename(filepath)} ({os.path.getsize(filepath) / (1024*1024):.2f} MB)")
 
-def export_object(obj, obj_filepath, mf_filepath):
+def export_object(obj, obj_filepath, mf_filepath, ground_z=False):
     """Exports a specific Blender mesh object to OBJ and/or 3MF."""
     mesh = obj.data
+    if ground_z and len(mesh.vertices) > 0:
+        verts_co = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+        mesh.vertices.foreach_get('co', verts_co)
+        min_z = float(np.min(verts_co.reshape((-1, 3))[:, 2]))
+        if abs(min_z) > 1e-6:
+            z_offset = -min_z
+            log(f"Grounding '{obj.name}' to print bed (shifting Z by {z_offset:.4f})...")
+            verts_reshaped = verts_co.reshape((-1, 3))
+            verts_reshaped[:, 2] += z_offset
+            mesh.vertices.foreach_set('co', verts_reshaped.flatten())
+            mesh.update()
+
     num_loops = len(mesh.loops)
     color_layer = mesh.color_attributes.active
     if not color_layer and len(mesh.color_attributes) > 0:
@@ -155,7 +167,7 @@ def bisect_mesh(obj, plane_co, plane_no, clear_outer, clear_inner, cap_cut):
 
     res = bmesh.ops.bisect_plane(
         bm,
-        geom=bm.faces[:] + [e for e in bm.edges if not e.link_faces],
+        geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
         plane_co=plane_co,
         plane_no=plane_no,
         clear_outer=clear_outer,
@@ -334,7 +346,7 @@ def carve_part_sockets(part_obj, plane_co, plane_no, socket_radius_mm=1.65, sock
     euler = quat.to_euler()
 
     for idx, s_pos in enumerate(safe_sockets_3d):
-        loc = s_pos - plane_no * (d_socket / 2.0)
+        loc = s_pos + plane_no * (d_socket / 2.0)
         bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=r_socket, depth=d_socket, location=loc, rotation=euler)
         cyl = bpy.context.active_object
         mod = part_obj.modifiers.new(name=f'SocketDiff_{idx}', type='BOOLEAN')
@@ -497,7 +509,7 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
         mod1 = part1.modifiers.new(name=f'SocketDiff1_{idx}', type='BOOLEAN')
         mod1.operation = 'DIFFERENCE'
         mod1.object = cyl1
-        mod1.solver = 'EXACT'
+        mod1.solver = 'FLOAT'
         bpy.context.view_layer.objects.active = part1
         bpy.ops.object.modifier_apply(modifier=f'SocketDiff1_{idx}')
         bpy.data.objects.remove(cyl1, do_unlink=True)
@@ -509,7 +521,7 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
         mod2 = part2.modifiers.new(name=f'SocketDiff2_{idx}', type='BOOLEAN')
         mod2.operation = 'DIFFERENCE'
         mod2.object = cyl2
-        mod2.solver = 'EXACT'
+        mod2.solver = 'FLOAT'
         bpy.context.view_layer.objects.active = part2
         bpy.ops.object.modifier_apply(modifier=f'SocketDiff2_{idx}')
         bpy.data.objects.remove(cyl2, do_unlink=True)
@@ -620,12 +632,6 @@ def main():
         verts_mat = verts_co.reshape((-1, 3))
         min_bounds = np.min(verts_mat, axis=0)
 
-    if args.ground_z:
-        z_offset = -min_bounds[2]
-        log(f"Grounding model to print bed (shifting Z by {z_offset:.4f}mm)...")
-        for v in mesh.vertices:
-            v.co.z += z_offset
-
     def split_path(base_path, suffix):
         if not base_path:
             return ""
@@ -664,7 +670,7 @@ def main():
                 for cp in planes_for_part:
                     p_co = (float(cp["point"][0]), float(cp["point"][1]), float(cp["point"][2]))
                     p_no = (float(cp["normal"][0]), float(cp["normal"][1]), float(cp["normal"][2]))
-                    bisect_mesh(part_obj, p_co, p_no, clear_outer=True, clear_inner=False, cap_cut=False)
+                    bisect_mesh(part_obj, p_co, p_no, clear_outer=False, clear_inner=True, cap_cut=False)
                     if args.split_cap:
                         build_flat_bulkhead(part_obj, p_co, p_no)
                     if args.add_pegs and args.split_cap:
@@ -760,7 +766,7 @@ def main():
             part_obj_out = split_path(args.output_obj, safe_name)
             part_3mf_out = split_path(args.output_3mf, safe_name)
 
-            export_object(part_obj, part_obj_out, part_3mf_out)
+            export_object(part_obj, part_obj_out, part_3mf_out, ground_z=args.ground_z)
 
             # Clean up memory immediately
             bpy.data.objects.remove(part_obj, do_unlink=True)
@@ -857,9 +863,9 @@ def main():
         p2_3mf = split_path(args.output_3mf, "part2")
 
         log("Exporting Part 1...")
-        export_object(part1, p1_obj, p1_3mf)
+        export_object(part1, p1_obj, p1_3mf, ground_z=args.ground_z)
         log("Exporting Part 2...")
-        export_object(part2, p2_obj, p2_3mf)
+        export_object(part2, p2_obj, p2_3mf, ground_z=args.ground_z)
 
     else:
         # Standard Single-Model Decimation & Export
@@ -888,7 +894,7 @@ def main():
             bpy.context.view_layer.objects.active = obj
             bpy.ops.object.modifier_apply(modifier='Solidify')
 
-        export_object(obj, args.output_obj, args.output_3mf)
+        export_object(obj, args.output_obj, args.output_3mf, ground_z=args.ground_z)
 
     log(f"ALL DONE! Total processing time: {time.time()-t_start:.2f}s")
 
