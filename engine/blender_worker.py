@@ -42,6 +42,7 @@ def parse_args():
     parser.add_argument("--add-pegs", action="store_true", help="Add snap-fit male peg & female socket at cut interface")
     parser.add_argument("--peg-radius", type=float, default=2.0, help="Radius of alignment peg in mm (default: 2.0)")
     parser.add_argument("--peg-height", type=float, default=5.0, help="Height of alignment peg in mm (default: 5.0)")
+    parser.add_argument("--solidify-mm", type=float, default=0.0, help="Inward wall thickness in mm for open shells (0.0=disabled)")
     parser.add_argument("--split-cap", action="store_true", default=True, help="Cap cut surfaces for watertight printing")
     parser.add_argument("--no-split-cap", dest="split_cap", action="store_false", help="Do not cap cut surfaces")
 
@@ -119,6 +120,10 @@ def export_object(obj, obj_filepath, mf_filepath):
     mesh = obj.data
     num_loops = len(mesh.loops)
     color_layer = mesh.color_attributes.active
+    if not color_layer and len(mesh.color_attributes) > 0:
+        color_layer = mesh.color_attributes.get('Color') or mesh.color_attributes[0]
+        mesh.color_attributes.active = color_layer
+
     if color_layer:
         raw_c = np.empty(num_loops * 4, dtype=np.float32)
         color_layer.data.foreach_get('color', raw_c)
@@ -150,7 +155,7 @@ def bisect_mesh(obj, plane_co, plane_no, clear_outer, clear_inner, cap_cut):
 
     res = bmesh.ops.bisect_plane(
         bm,
-        geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
+        geom=bm.faces[:] + [e for e in bm.edges if not e.link_faces],
         plane_co=plane_co,
         plane_no=plane_no,
         clear_outer=clear_outer,
@@ -160,10 +165,26 @@ def bisect_mesh(obj, plane_co, plane_no, clear_outer, clear_inner, cap_cut):
     if cap_cut:
         cut_edges = [e for e in res['geom_cut'] if isinstance(e, bmesh.types.BMEdge)]
         if cut_edges:
-            bmesh.ops.edgenet_fill(bm, edges=cut_edges)
+            color_layer = bm.loops.layers.color.active
+            seam_colors = {}
+            if color_layer:
+                for e in cut_edges:
+                    for l in e.link_loops:
+                        seam_colors[l.vert] = l[color_layer]
+            fill_res = bmesh.ops.edgenet_fill(bm, edges=cut_edges)
+            new_faces = fill_res.get('faces', [])
+            if color_layer and new_faces:
+                avg_c = (0.8, 0.8, 0.8, 1.0)
+                if seam_colors:
+                    c_arr = np.array(list(seam_colors.values()))
+                    avg_c = tuple(np.mean(c_arr, axis=0))
+                for nf in new_faces:
+                    for l in nf.loops:
+                        l[color_layer] = seam_colors.get(l.vert, avg_c)
 
     # Always triangulate and recalculate normals so slicers receive pure valid triangles
     bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+    bmesh.ops.dissolve_degenerate(bm, dist=1e-5, edges=bm.edges[:])
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
 
     bm.to_mesh(obj.data)
@@ -178,8 +199,17 @@ def add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=
     plane_co = mathutils.Vector(plane_co)
     plane_no = mathutils.Vector(plane_no).normalized()
 
+    # Detect unit scale (meters vs millimeters):
+    # If model max dimension is < 10.0 (meters, e.g. 0.98), convert mm arguments to meters
+    max_dim = max(max(part1.dimensions), max(part2.dimensions))
+    scale_fac = 0.001 if max_dim < 10.0 else 1.0
+    r_u = peg_radius * scale_fac
+    h_u = peg_height * scale_fac
+    clearance_u = clearance * scale_fac
+    tol_u = 0.5 * scale_fac
+
     # Find vertices on the cut interface
-    verts1 = [v.co for v in part1.data.vertices if abs((v.co - plane_co).dot(plane_no)) < 0.25]
+    verts1 = [v.co for v in part1.data.vertices if abs((v.co - plane_co).dot(plane_no)) < tol_u]
     if not verts1 or len(verts1) < 3:
         log("Cut interface vertices not clearly identified; placing peg at cut origin.")
         centroid = plane_co
@@ -187,29 +217,29 @@ def add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=
         centroid = sum(verts1, mathutils.Vector((0.0, 0.0, 0.0))) / len(verts1)
         # Check boundary spread to prevent oversized pegs on thin walls
         dists = [(v - centroid).length for v in verts1]
-        spread = min(dists) if dists else 10.0
-        if spread < peg_radius * 1.5:
-            adj_radius = max(0.8, spread * 0.45)
-            log(f"Cut surface is narrow (spread: {spread:.2f}mm); adjusting peg radius from {peg_radius:.1f}mm to {adj_radius:.2f}mm")
-            peg_radius = adj_radius
+        spread = min(dists) if dists else (10.0 * scale_fac)
+        if spread < r_u * 1.5:
+            adj_radius = max(0.4 * scale_fac, spread * 0.45)
+            log(f"Cut surface is narrow (spread: {spread/scale_fac:.2f}mm); adjusting peg radius from {peg_radius:.1f}mm to {adj_radius/scale_fac:.2f}mm")
+            r_u = adj_radius
 
     quat = mathutils.Vector((0.0, 0.0, 1.0)).rotation_difference(plane_no)
     euler = quat.to_euler()
 
     # 1. Male Peg on Part 1 (protruding along plane_no)
-    log(f"Adding male snap peg (radius={peg_radius:.2f}mm, height={peg_height:.2f}mm) at {centroid}...")
+    log(f"Adding male snap peg (radius={r_u/scale_fac:.2f}mm, height={h_u/scale_fac:.2f}mm) at {centroid}...")
     try:
         bm1 = bmesh.new()
         bm1.from_mesh(part1.data)
-        peg_loc = centroid + plane_no * (peg_height / 2.0 - 0.5)
+        peg_loc = centroid + plane_no * (h_u / 2.0 - 0.2 * scale_fac)
         M = mathutils.Matrix.Translation(peg_loc) @ quat.to_matrix().to_4x4()
         bmesh.ops.create_cone(
             bm1,
             cap_ends=True,
             segments=24,
-            radius1=peg_radius,
-            radius2=peg_radius,
-            depth=peg_height + 1.0,
+            radius1=r_u,
+            radius2=r_u,
+            depth=h_u + 0.4 * scale_fac,
             matrix=M
         )
         bmesh.ops.triangulate(bm1, faces=bm1.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
@@ -221,10 +251,10 @@ def add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=
         log(f"WARNING: Could not integrate male peg: {e}")
 
     # 2. Female Socket on Part 2 (recessed along plane_no with clearance)
-    socket_radius = peg_radius + clearance
-    socket_depth = peg_height + 0.6
+    socket_radius = r_u + clearance_u
+    socket_depth = h_u + 0.6 * scale_fac
     socket_loc = centroid + plane_no * (socket_depth / 2.0)
-    log(f"Carving female socket hole (radius={socket_radius:.2f}mm, depth={socket_depth:.2f}mm) into Part 2...")
+    log(f"Carving female socket hole (radius={socket_radius/scale_fac:.2f}mm, depth={socket_depth/scale_fac:.2f}mm) into Part 2...")
     init_v2 = len(part2.data.vertices)
     part2_backup = part2.data.copy()
     try:
@@ -417,16 +447,45 @@ def main():
                     valid_seam_edges = [e for e in cut_seam_edges if e.is_valid and e.is_boundary]
                     if valid_seam_edges:
                         log(f"Attempting cut-seam capping on {len(valid_seam_edges)} seam edges for '{safe_name}'...")
+                        color_layer = bm.loops.layers.color.active
+                        seam_colors = {}
+                        if color_layer:
+                            for e in valid_seam_edges:
+                                for l in e.link_loops:
+                                    seam_colors[l.vert] = l[color_layer]
                         res = bmesh.ops.edgenet_fill(bm, edges=valid_seam_edges)
+                        new_faces = res.get('faces', [])
+                        if color_layer and new_faces:
+                            avg_c = (0.8, 0.8, 0.8, 1.0)
+                            if seam_colors:
+                                c_arr = np.array(list(seam_colors.values()))
+                                avg_c = tuple(np.mean(c_arr, axis=0))
+                            for nf in new_faces:
+                                for l in nf.loops:
+                                    l[color_layer] = seam_colors.get(l.vert, avg_c)
                 except Exception as cap_err:
                     log(f"Cut-seam capping skipped for '{safe_name}': {cap_err}")
 
             # ALWAYS triangulate all faces so slicers never encounter N-gons (> 4 vertices)
             bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+            bmesh.ops.dissolve_degenerate(bm, dist=1e-5, edges=bm.edges[:])
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
 
             bm.to_mesh(part_obj.data)
             bm.free()
+
+            # Optional Inward Solidify for open shells
+            if args.solidify_mm > 0.0:
+                max_dim = max(part_obj.dimensions)
+                scale_fac = 0.001 if max_dim < 10.0 else 1.0
+                thick_u = args.solidify_mm * scale_fac
+                log(f"SOLIDIFY: Adding {args.solidify_mm:.1f}mm wall thickness inward ({thick_u:.5f} units) to '{safe_name}'...")
+                mod_sol = part_obj.modifiers.new(name='Solidify', type='SOLIDIFY')
+                mod_sol.thickness = thick_u
+                mod_sol.offset = -1.0
+                mod_sol.use_rim = True
+                bpy.context.view_layer.objects.active = part_obj
+                bpy.ops.object.modifier_apply(modifier='Solidify')
 
             # Optional decimation on the extracted part
             if args.decimate_ratio < 0.999 or (args.target_triangles > 0 and len(part_obj.data.polygons) > args.target_triangles):
@@ -493,6 +552,19 @@ def main():
         bisect_mesh(part1, plane_co, plane_no, clear_outer=True, clear_inner=False, cap_cut=args.split_cap)
         bisect_mesh(part2, plane_co, plane_no, clear_outer=False, clear_inner=True, cap_cut=args.split_cap)
 
+        if args.solidify_mm > 0.0:
+            for p, p_name in ((part1, "Part 1"), (part2, "Part 2")):
+                max_dim = max(p.dimensions)
+                scale_fac = 0.001 if max_dim < 10.0 else 1.0
+                thick_u = args.solidify_mm * scale_fac
+                log(f"SOLIDIFY: Adding {args.solidify_mm:.1f}mm wall thickness inward ({thick_u:.5f} units) to {p_name}...")
+                mod_sol = p.modifiers.new(name='Solidify', type='SOLIDIFY')
+                mod_sol.thickness = thick_u
+                mod_sol.offset = -1.0
+                mod_sol.use_rim = True
+                bpy.context.view_layer.objects.active = p
+                bpy.ops.object.modifier_apply(modifier='Solidify')
+
         if args.add_pegs and args.split_cap:
             add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=args.peg_radius, peg_height=args.peg_height)
 
@@ -520,6 +592,18 @@ def main():
             mod.ratio = float(target_ratio)
             bpy.ops.object.modifier_apply(modifier='Decimate')
             log(f"Decimation done in {time.time()-t_dec:.2f}s. New verts: {len(mesh.vertices)}, faces: {len(mesh.polygons)}")
+
+        if args.solidify_mm > 0.0:
+            max_dim = max(obj.dimensions)
+            scale_fac = 0.001 if max_dim < 10.0 else 1.0
+            thick_u = args.solidify_mm * scale_fac
+            log(f"SOLIDIFY: Adding {args.solidify_mm:.1f}mm wall thickness inward ({thick_u:.5f} units)...")
+            mod_sol = obj.modifiers.new(name='Solidify', type='SOLIDIFY')
+            mod_sol.thickness = thick_u
+            mod_sol.offset = -1.0
+            mod_sol.use_rim = True
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.modifier_apply(modifier='Solidify')
 
         export_object(obj, args.output_obj, args.output_3mf)
 

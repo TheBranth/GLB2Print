@@ -31,6 +31,7 @@ class ConversionJob:
                  add_pegs: bool = False,
                  peg_radius: float = 2.0,
                  peg_height: float = 5.0,
+                 solidify_mm: float = 0.0,
                  parts_json: Optional[str] = None,
                  log_callback: Optional[Callable[[str], None]] = None,
                  progress_callback: Optional[Callable[[float, str], None]] = None):
@@ -51,6 +52,7 @@ class ConversionJob:
         self.add_pegs = add_pegs
         self.peg_radius = peg_radius
         self.peg_height = peg_height
+        self.solidify_mm = solidify_mm
         self.parts_json = os.path.abspath(parts_json) if parts_json else ""
         self.log_callback = log_callback or (lambda msg: None)
         self.progress_callback = progress_callback or (lambda pct, msg: None)
@@ -92,32 +94,35 @@ class ConversionJob:
             "-b",
             "--python", str(worker_script),
             "--",
-            "--input", self.input_glb,
-            "--texture-res", str(self.texture_res),
-            "--target-triangles", str(self.target_triangles),
-            "--decimate-ratio", str(self.decimate_ratio),
-            "--height-mm", str(self.height_mm),
-            "--split-axis", self.split_axis,
-            "--split-coord", str(self.split_coord),
+            f"--input={self.input_glb}",
+            f"--texture-res={self.texture_res}",
+            f"--target-triangles={self.target_triangles}",
+            f"--decimate-ratio={self.decimate_ratio}",
+            f"--height-mm={self.height_mm}",
+            f"--split-axis={self.split_axis}",
+            f"--split-coord={self.split_coord}",
         ]
 
         if not self.split_cap:
             cmd.append("--no-split-cap")
 
+        if self.solidify_mm > 0.0:
+            cmd.append(f"--solidify-mm={self.solidify_mm}")
+
         if self.plane_point and self.plane_normal:
-            cmd.extend(["--plane-point", self.plane_point, "--plane-normal", self.plane_normal])
+            cmd.extend([f"--plane-point={self.plane_point}", f"--plane-normal={self.plane_normal}"])
 
         if self.add_pegs:
             cmd.append("--add-pegs")
-            cmd.extend(["--peg-radius", str(self.peg_radius), "--peg-height", str(self.peg_height)])
+            cmd.extend([f"--peg-radius={self.peg_radius}", f"--peg-height={self.peg_height}"])
 
         if self.parts_json:
-            cmd.extend(["--parts-json", self.parts_json])
+            cmd.extend([f"--parts-json={self.parts_json}"])
 
         if self.output_obj:
-            cmd.extend(["--output-obj", self.output_obj])
+            cmd.extend([f"--output-obj={self.output_obj}"])
         if self.output_3mf:
-            cmd.extend(["--output-3mf", self.output_3mf])
+            cmd.extend([f"--output-3mf={self.output_3mf}"])
         if self.ground_z:
             cmd.append("--ground-z")
 

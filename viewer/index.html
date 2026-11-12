@@ -470,10 +470,27 @@
         <div class="card">
           <div class="card-title">Pre-Bake Texture Res</div>
           <div class="pill-group" id="tex-res-pills">
-            <div class="pill-btn" onclick="setTexRes(0, this)">Original</div>
+            <div class="pill-btn active" onclick="setTexRes(0, this)">Original (Crisp)</div>
             <div class="pill-btn" onclick="setTexRes(2048, this)">2048px</div>
-            <div class="pill-btn active" onclick="setTexRes(1024, this)">1024px</div>
+            <div class="pill-btn" onclick="setTexRes(1024, this)">1024px</div>
             <div class="pill-btn" onclick="setTexRes(512, this)">512px</div>
+          </div>
+        </div>
+
+        <!-- 3. SHELL WALL THICKNESS (SOLIDIFY) -->
+        <div class="card">
+          <div class="card-title">
+            <span>Shell Wall Thickness (Solidify)</span>
+            <span style="font-size: 0.68rem; color: #38bdf8; font-weight: 600;">Fixes Slicer ⚠️</span>
+          </div>
+          <div style="font-size: 0.72rem; color: #94a3b8; margin-bottom: 7px; line-height: 1.35;">
+            Extrudes inward walls to turn open shells (masks, visors, sculptures) into watertight, rigid 3D solids.
+          </div>
+          <div class="pill-group" id="solidify-pills">
+            <div class="pill-btn active" onclick="setSolidify(2.5, this)">2.5mm (Solid)</div>
+            <div class="pill-btn" onclick="setSolidify(3.0, this)">3.0mm</div>
+            <div class="pill-btn" onclick="setSolidify(2.0, this)">2.0mm</div>
+            <div class="pill-btn" onclick="setSolidify(0.0, this)">Off (Raw Shell)</div>
           </div>
         </div>
 
@@ -740,7 +757,8 @@
     let currentSplitMode = 'none'; // 'none', 'planar', 'lasso'
     let currentPlaneAxis = 'X';
     let currentPlaneCoord = 0.0;
-    let currentTexRes = 1024;
+    let currentTexRes = 0; // 0 = Original 4K (crisp, zero downsampling noise)
+    let currentSolidifyMm = 2.5; // 2.5mm default inward wall thickness for open shells
     let currentDecimateCount = 250000;
     let isDecimateEnabled = true;
 
@@ -1742,6 +1760,14 @@
       else if (typeof event !== 'undefined' && event && event.target) event.target.classList.add('active');
     }
 
+    function setSolidify(val, el) {
+      currentSolidifyMm = val;
+      const pills = document.getElementById('solidify-pills').children;
+      for (let p of pills) p.classList.remove('active');
+      if (el) el.classList.add('active');
+      else if (typeof event !== 'undefined' && event && event.target) event.target.classList.add('active');
+    }
+
     function toggleDecimate(enabled) {
       isDecimateEnabled = enabled;
       document.getElementById('decimate-slider').disabled = !enabled;
@@ -1882,6 +1908,7 @@
       const payload = {
         texture_res: currentTexRes,
         target_triangles: isDecimateEnabled ? currentDecimateCount : 0,
+        solidify_mm: currentSolidifyMm,
         ground_z: groundZ,
         format: fmt,
         cap_cut: capHoles,

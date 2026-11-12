@@ -377,6 +377,7 @@ class UnifiedAppServer:
                         add_pegs = bool(data.get("add_pegs", False))
                         peg_radius = float(data.get("peg_radius", 2.0))
                         peg_height = float(data.get("peg_height", 5.0))
+                        solidify_mm = float(data.get("solidify_mm", 0.0))
 
                         if parts_data:
                             with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tf:
@@ -388,7 +389,7 @@ class UnifiedAppServer:
                             output_obj=out_obj,
                             output_3mf=out_3mf,
                             blender_path=parent_self.cfg.get("blender_path"),
-                            texture_res=int(data.get("texture_res", 1024)),
+                            texture_res=int(data.get("texture_res", 0)),
                             target_triangles=int(data.get("target_triangles", 250000)),
                             ground_z=bool(data.get("ground_z", True)),
                             split_axis=split_axis if split_mode == "planar" else "none",
@@ -399,6 +400,7 @@ class UnifiedAppServer:
                             add_pegs=add_pegs if split_mode == "planar" else False,
                             peg_radius=peg_radius,
                             peg_height=peg_height,
+                            solidify_mm=solidify_mm,
                             parts_json=temp_json
                         )
 
