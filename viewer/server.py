@@ -360,9 +360,9 @@ class UnifiedAppServer:
                                 parts = stem.split("_", 2)
                                 stem = parts[-1] if len(parts) >= 3 else "model"
 
-                        fmt = data.get("format", "both")
-                        out_obj = str(out_dir / f"{stem}.obj") if fmt in ("obj", "both") else None
-                        out_3mf = str(out_dir / f"{stem}.3mf") if fmt in ("3mf", "both") else None
+                        fmt = data.get("format", "obj")
+                        out_obj = str(out_dir / f"{stem}.obj")
+                        out_3mf = None
 
                         split_mode = data.get("split_mode", "none")
                         split_axis = data.get("split_axis", "none")

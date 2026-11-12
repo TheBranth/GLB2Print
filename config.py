@@ -86,8 +86,8 @@ def find_blender_binary():
 
 DEFAULT_CONFIG = {
     "blender_path": "",
-    "default_format": "both",       # "obj", "3mf", "both"
-    "default_texture_res": 1024,    # 0 = original, 512, 1024, 2048
+    "default_format": "obj",        # "obj" (vertex colors)
+    "default_texture_res": 0,       # 0 = original, 512, 1024, 2048
     "default_triangles": 250000,    # 0 = no decimation
     "ground_z": True,
     "scale_height_mm": 0.0,         # 0.0 = keep original

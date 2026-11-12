@@ -573,11 +573,11 @@
 
             <!-- Sockets & Dowel Pins Option -->
             <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
-              <label class="check-row" title="Carves recessed female sockets on flat cut surfaces and exports alignment_pins.3mf. Keeps parts 100% flat on print bed with anti-puncture wall margin.">
+              <label class="check-row" title="Carves recessed female sockets on flat cut surfaces and exports alignment_pins.obj. Keeps parts 100% flat on print bed with anti-puncture wall margin.">
                 <input type="checkbox" id="chk-add-pegs" checked> 🧩 Alignment Sockets + Printable Pins (Flat-Bed)
               </label>
               <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px; line-height: 1.3;">
-                Both parts stay flat on the bed with recessed sockets (anti-swiss-cheese guard &ge; 2mm margin). Generates companion <code>alignment_pins.3mf</code>.
+                Both parts stay flat on the bed with recessed sockets (anti-swiss-cheese guard &ge; 2mm margin). Generates companion <code>alignment_pins.obj</code>.
               </div>
             </div>
           </div>
@@ -624,16 +624,13 @@
 
         <!-- 5. PRINT BED PREP & FORMATS -->
         <div class="card">
-          <div class="card-title">3D Print Bed & Formats</div>
+          <div class="card-title">3D Print Bed & Export</div>
           <label class="check-row">
-            <input type="checkbox" id="chk-ground-z" checked> Auto-ground to bed ($Z = 0.0$)
+            <input type="checkbox" id="chk-ground-z" checked> Auto-ground to bed (Z = 0.0)
           </label>
           <div style="display: flex; gap: 12px; margin-top: 6px;">
             <label class="check-row">
-              <input type="checkbox" id="chk-fmt-obj" checked> OBJ (vertex colors)
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="chk-fmt-3mf" checked> 3MF (color groups)
+              <input type="checkbox" id="chk-fmt-obj" checked disabled> OBJ (vertex colors)
             </label>
           </div>
         </div>
@@ -1915,11 +1912,7 @@
         statusLbl.innerText = 'Processing in Blender... (Expect ~15–30s)';
       }
 
-      const fmtObj = document.getElementById('chk-fmt-obj').checked;
-      const fmt3mf = document.getElementById('chk-fmt-3mf').checked;
-      let fmt = 'both';
-      if (fmtObj && !fmt3mf) fmt = 'obj';
-      else if (!fmtObj && fmt3mf) fmt = '3mf';
+      const fmt = 'obj';
 
       const capHoles = document.getElementById('chk-cap-holes').checked;
       const groundZ = document.getElementById('chk-ground-z').checked;

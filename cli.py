@@ -18,7 +18,7 @@ def parse_args():
     )
     parser.add_argument("inputs", nargs="+", help="Input GLB file(s) or glob pattern (e.g. model.glb or models/*.glb)")
     parser.add_argument("-o", "--output-dir", default="", help="Output directory (default: same folder as input)")
-    parser.add_argument("-f", "--format", choices=["obj", "3mf", "both"], default="both", help="Export format (default: both)")
+    parser.add_argument("-f", "--format", choices=["obj", "3mf", "both"], default="obj", help="Export format (default: obj)")
     parser.add_argument("-t", "--triangles", type=int, default=250000, help="Target triangle count (default: 250000, 0 = keep original)")
     parser.add_argument("-r", "--texture-res", type=int, default=1024, help="Max texture dimension before baking (e.g. 512, 1024, 2048, 0=original)")
     parser.add_argument("--no-ground", action="store_true", help="Do not ground bottom of model to Z=0")
