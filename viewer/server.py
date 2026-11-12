@@ -369,6 +369,7 @@ class UnifiedAppServer:
                         split_coord = float(data.get("split_coord", 0.0))
                         cap_cut = bool(data.get("cap_cut", True))
                         parts_data = data.get("parts", None)
+                        parts_planes = data.get("parts_planes", None)
 
                         plane_point = data.get("plane_point", None)
                         plane_normal = data.get("plane_normal", None)
@@ -381,7 +382,10 @@ class UnifiedAppServer:
 
                         if parts_data:
                             with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tf:
-                                json.dump(parts_data, tf)
+                                if parts_planes:
+                                    json.dump({"parts": parts_data, "planes": parts_planes}, tf)
+                                else:
+                                    json.dump(parts_data, tf)
                                 temp_json = tf.name
 
                         job = ConversionJob(
@@ -397,7 +401,7 @@ class UnifiedAppServer:
                             split_cap=cap_cut,
                             plane_point=plane_pt_str if split_mode == "planar" else None,
                             plane_normal=plane_no_str if split_mode == "planar" else None,
-                            add_pegs=add_pegs if split_mode == "planar" else False,
+                            add_pegs=add_pegs,
                             peg_radius=peg_radius,
                             peg_height=peg_height,
                             solidify_mm=solidify_mm,

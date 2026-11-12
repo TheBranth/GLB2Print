@@ -190,99 +190,332 @@ def bisect_mesh(obj, plane_co, plane_no, clear_outer, clear_inner, cap_cut):
     bm.to_mesh(obj.data)
     bm.free()
 
-def add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=2.0, peg_height=5.0, clearance=0.2):
+def build_flat_bulkhead(obj, plane_co, plane_no):
     """
-    Creates a snap-fit male peg on part1 and a matching female socket hole on part2
-    at the centroid of the planar cut interface.
+    Builds a flat 2D planar bulkhead closing the cut cross-section
+    so the piece can be printed completely flat on the build plate.
     """
     import mathutils
     plane_co = mathutils.Vector(plane_co)
     plane_no = mathutils.Vector(plane_no).normalized()
 
-    # Detect unit scale (meters vs millimeters):
-    # If model max dimension is < 10.0 (meters, e.g. 0.98), convert mm arguments to meters
-    max_dim = max(max(part1.dimensions), max(part2.dimensions))
-    scale_fac = 0.001 if max_dim < 10.0 else 1.0
-    r_u = peg_radius * scale_fac
-    h_u = peg_height * scale_fac
-    clearance_u = clearance * scale_fac
-    tol_u = 0.5 * scale_fac
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
 
-    # Find vertices on the cut interface
-    verts1 = [v.co for v in part1.data.vertices if abs((v.co - plane_co).dot(plane_no)) < tol_u]
-    if not verts1 or len(verts1) < 3:
-        log("Cut interface vertices not clearly identified; placing peg at cut origin.")
-        centroid = plane_co
+    cut_verts = [v for v in bm.verts if abs((v.co - plane_co).dot(plane_no)) < 2e-4]
+    if len(cut_verts) < 6:
+        bm.free()
+        return
+
+    # 2D projection on the cut plane
+    if abs(plane_no.z) < 0.9:
+        tangent = plane_no.cross(mathutils.Vector((0, 0, 1))).normalized()
     else:
-        centroid = sum(verts1, mathutils.Vector((0.0, 0.0, 0.0))) / len(verts1)
-        # Check boundary spread to prevent oversized pegs on thin walls
-        dists = [(v - centroid).length for v in verts1]
-        spread = min(dists) if dists else (10.0 * scale_fac)
-        if spread < r_u * 1.5:
-            adj_radius = max(0.4 * scale_fac, spread * 0.45)
-            log(f"Cut surface is narrow (spread: {spread/scale_fac:.2f}mm); adjusting peg radius from {peg_radius:.1f}mm to {adj_radius/scale_fac:.2f}mm")
-            r_u = adj_radius
+        tangent = plane_no.cross(mathutils.Vector((0, 1, 0))).normalized()
+    bitangent = plane_no.cross(tangent).normalized()
 
-    quat = mathutils.Vector((0.0, 0.0, 1.0)).rotation_difference(plane_no)
+    pts_2d = [mathutils.Vector(((v.co - plane_co).dot(tangent), (v.co - plane_co).dot(bitangent))) for v in cut_verts]
+    hull_indices = mathutils.geometry.convex_hull_2d(pts_2d)
+
+    if len(hull_indices) >= 3:
+        hull_verts = [cut_verts[i] for i in hull_indices]
+
+        # Inherit vertex color from seam
+        color_layer = bm.loops.layers.color.active
+        seam_color = (0.8, 0.8, 0.8, 1.0)
+        if color_layer:
+            cols = []
+            for v in hull_verts:
+                for l in v.link_loops:
+                    try:
+                        cols.append(l[color_layer])
+                    except Exception:
+                        pass
+            if cols:
+                c_mat = np.array([c[:4] for c in cols])
+                seam_color = tuple(np.mean(c_mat, axis=0))
+
+        try:
+            f = bm.faces.new(hull_verts)
+            if color_layer:
+                for l in f.loops:
+                    l[color_layer] = seam_color
+            bmesh.ops.triangulate(bm, faces=[f], quad_method='BEAUTY', ngon_method='BEAUTY')
+            log(f"Flat bulkhead built on '{obj.name}' with {len(hull_verts)} perimeter vertices.")
+        except Exception as e:
+            hull_edges = []
+            for i in range(len(hull_verts)):
+                v1 = hull_verts[i]
+                v2 = hull_verts[(i + 1) % len(hull_verts)]
+                e = bm.edges.get((v1, v2)) or bm.edges.new((v1, v2))
+                hull_edges.append(e)
+            res = bmesh.ops.edgenet_fill(bm, edges=hull_edges)
+            new_faces = res.get('faces', [])
+            if color_layer and new_faces:
+                for nf in new_faces:
+                    for l in nf.loops:
+                        l[color_layer] = seam_color
+
+        bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+        bmesh.ops.dissolve_degenerate(bm, dist=1e-5, edges=bm.edges[:])
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+    bm.to_mesh(obj.data)
+    bm.free()
+
+def carve_part_sockets(part_obj, plane_co, plane_no, socket_radius_mm=1.65, socket_depth_mm=5.0, min_wall_margin_mm=2.0, num_pins=2):
+    """
+    Carves recessed female cylindrical sockets on the flat cut bulkhead of a part.
+    Enforces strict Anti-Swiss-Cheese margin guard (>= min_wall_margin_mm from all outer surfaces).
+    Uses FLOAT boolean solver for lightning-fast, robust carving.
+    """
+    import mathutils
+    plane_co = mathutils.Vector(plane_co)
+    plane_no = mathutils.Vector(plane_no).normalized()
+
+    max_dim = max(part_obj.dimensions)
+    scale_fac = 0.001 if max_dim < 10.0 else 1.0
+
+    r_socket = socket_radius_mm * scale_fac
+    d_socket = socket_depth_mm * scale_fac
+    margin_u = min_wall_margin_mm * scale_fac
+
+    cut_verts = [v.co for v in part_obj.data.vertices if abs((v.co - plane_co).dot(plane_no)) < 2e-4]
+    if len(cut_verts) < 6:
+        return []
+
+    if abs(plane_no.z) < 0.9:
+        tangent = plane_no.cross(mathutils.Vector((0, 0, 1))).normalized()
+    else:
+        tangent = plane_no.cross(mathutils.Vector((0, 1, 0))).normalized()
+    bitangent = plane_no.cross(tangent).normalized()
+
+    pts_2d = [mathutils.Vector(((v - plane_co).dot(tangent), (v - plane_co).dot(bitangent))) for v in cut_verts]
+    hull_idx = mathutils.geometry.convex_hull_2d(pts_2d)
+    hull_pts = [pts_2d[i] for i in hull_idx]
+
+    centroid_2d = sum(pts_2d, mathutils.Vector((0, 0))) / len(pts_2d)
+
+    diffs = [p - centroid_2d for p in hull_pts]
+    span_u = max((abs(d.x) for d in diffs), default=0.05)
+    span_w = max((abs(d.y) for d in diffs), default=0.05)
+    major_dir = mathutils.Vector((1, 0)) if span_u >= span_w else mathutils.Vector((0, 1))
+    max_span = max(span_u, span_w)
+
+    candidates = []
+    if num_pins >= 2 and max_span > (r_socket + margin_u) * 4.0:
+        offset = max_span * 0.35
+        candidates.append(centroid_2d + major_dir * offset)
+        candidates.append(centroid_2d - major_dir * offset)
+    else:
+        candidates.append(centroid_2d)
+
+    safe_sockets_3d = []
+    for cand in candidates:
+        clearance = min(((p - cand).length for p in hull_pts), default=0.0)
+        clearance_mm = clearance / scale_fac
+        if clearance >= (r_socket + margin_u):
+            pt_3d = plane_co + tangent * cand.x + bitangent * cand.y
+            safe_sockets_3d.append(pt_3d)
+            log(f"Safe socket position on '{part_obj.name}': clearance={clearance_mm:.1f}mm (>= {min_wall_margin_mm:.1f}mm margin required).")
+        else:
+            c_clearance = min(((p - centroid_2d).length for p in hull_pts), default=0.0)
+            if c_clearance >= (r_socket + margin_u) and centroid_2d not in candidates:
+                pt_3d = plane_co + tangent * centroid_2d.x + bitangent * centroid_2d.y
+                safe_sockets_3d.append(pt_3d)
+                log(f"Adjusted socket on '{part_obj.name}' to deep centroid (clearance={c_clearance/scale_fac:.1f}mm).")
+            else:
+                log(f"WARNING: Skipping socket on '{part_obj.name}' to avoid puncturing outer sculpt (clearance {clearance_mm:.1f}mm < {min_wall_margin_mm:.1f}mm margin).")
+
+    if not safe_sockets_3d:
+        return []
+
+    quat = mathutils.Vector((0, 0, 1)).rotation_difference(plane_no)
     euler = quat.to_euler()
 
-    # 1. Male Peg on Part 1 (protruding along plane_no)
-    log(f"Adding male snap peg (radius={r_u/scale_fac:.2f}mm, height={h_u/scale_fac:.2f}mm) at {centroid}...")
-    try:
-        bm1 = bmesh.new()
-        bm1.from_mesh(part1.data)
-        peg_loc = centroid + plane_no * (h_u / 2.0 - 0.2 * scale_fac)
-        M = mathutils.Matrix.Translation(peg_loc) @ quat.to_matrix().to_4x4()
+    for idx, s_pos in enumerate(safe_sockets_3d):
+        loc = s_pos - plane_no * (d_socket / 2.0)
+        bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=r_socket, depth=d_socket, location=loc, rotation=euler)
+        cyl = bpy.context.active_object
+        mod = part_obj.modifiers.new(name=f'SocketDiff_{idx}', type='BOOLEAN')
+        mod.operation = 'DIFFERENCE'
+        mod.object = cyl
+        mod.solver = 'FLOAT'
+        bpy.context.view_layer.objects.active = part_obj
+        bpy.ops.object.modifier_apply(modifier=f'SocketDiff_{idx}')
+        bpy.data.objects.remove(cyl, do_unlink=True)
+
+    log(f"Carved {len(safe_sockets_3d)} alignment socket(s) into '{part_obj.name}'.")
+    return safe_sockets_3d
+
+def export_alignment_pins(output_3mf_path, output_obj_path, num_pins=4, pin_radius_mm=1.5, pin_length_mm=9.4):
+    """Exports printable cylindrical dowel pins to outputs/alignment_pins.3mf and .obj."""
+    import mathutils
+    bm = bmesh.new()
+    r = pin_radius_mm
+    h = pin_length_mm
+    spacing = r * 4.0
+
+    for i in range(num_pins):
+        col = i % 2
+        row = i // 2
+        loc = mathutils.Vector((col * spacing, row * spacing, h / 2.0))
+        M = mathutils.Matrix.Translation(loc)
         bmesh.ops.create_cone(
-            bm1,
+            bm,
             cap_ends=True,
             segments=24,
-            radius1=r_u,
-            radius2=r_u,
-            depth=h_u + 0.4 * scale_fac,
+            radius1=r,
+            radius2=r,
+            depth=h,
             matrix=M
         )
-        bmesh.ops.triangulate(bm1, faces=bm1.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
-        bmesh.ops.recalc_face_normals(bm1, faces=bm1.faces[:])
-        bm1.to_mesh(part1.data)
-        bm1.free()
-        log(f"Male peg integrated cleanly into Part 1 ({len(part1.data.vertices)} verts).")
-    except Exception as e:
-        log(f"WARNING: Could not integrate male peg: {e}")
 
-    # 2. Female Socket on Part 2 (recessed along plane_no with clearance)
-    socket_radius = r_u + clearance_u
-    socket_depth = h_u + 0.6 * scale_fac
-    socket_loc = centroid + plane_no * (socket_depth / 2.0)
-    log(f"Carving female socket hole (radius={socket_radius/scale_fac:.2f}mm, depth={socket_depth/scale_fac:.2f}mm) into Part 2...")
-    init_v2 = len(part2.data.vertices)
-    part2_backup = part2.data.copy()
-    try:
-        bpy.ops.mesh.primitive_cylinder_add(
-            vertices=24,
-            radius=socket_radius,
-            depth=socket_depth,
-            location=socket_loc,
-            rotation=euler
+    mesh = bpy.data.meshes.new('AlignmentPinsMesh')
+    bm.to_mesh(mesh)
+    bm.free()
+
+    pin_obj = bpy.data.objects.new('AlignmentPins', mesh)
+    bpy.context.collection.objects.link(pin_obj)
+
+    target_dir = os.path.dirname(output_3mf_path or output_obj_path or ".")
+    if output_3mf_path:
+        p3mf = os.path.join(target_dir, "alignment_pins.3mf")
+        export_3mf(p3mf, mesh, np.ones((len(mesh.loops), 4), dtype=np.float32) * 0.9)
+        log(f"Exported printable dowels: alignment_pins.3mf ({num_pins} pins)")
+
+    if output_obj_path:
+        pobj = os.path.join(target_dir, "alignment_pins.obj")
+        for o in bpy.data.objects:
+            o.select_set(o == pin_obj)
+        bpy.context.view_layer.objects.active = pin_obj
+        bpy.ops.wm.obj_export(
+            filepath=pobj,
+            export_colors=False,
+            export_materials=False,
+            export_selected_objects=True,
+            export_triangulated_mesh=True
         )
-        socket_obj = bpy.context.active_object
-        mod_diff = part2.modifiers.new(name='SocketDiff', type='BOOLEAN')
-        mod_diff.operation = 'DIFFERENCE'
-        mod_diff.object = socket_obj
-        mod_diff.solver = 'EXACT'
-        bpy.context.view_layer.objects.active = part2
-        bpy.ops.object.modifier_apply(modifier='SocketDiff')
-        bpy.data.objects.remove(socket_obj, do_unlink=True)
+        log(f"Exported printable dowels: alignment_pins.obj ({num_pins} pins)")
 
-        if len(part2.data.vertices) < init_v2 * 0.5:
-            log(f"WARNING: Socket boolean on non-manifold surface caused geometry collapse ({len(part2.data.vertices)} < {init_v2}); retaining clean flat cut face.")
-            part2.data = part2_backup
+    bpy.data.objects.remove(pin_obj, do_unlink=True)
+    bpy.data.meshes.remove(mesh, do_unlink=True)
+
+def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, output_3mf_path, output_obj_path,
+                                        socket_radius_mm=1.65, socket_depth_mm=5.0, min_wall_margin_mm=2.0, num_pins=2):
+    """
+    1. Builds a flat planar bulkhead on both Part 1 and Part 2 closing the cut cavity.
+    2. Enforces Swiss-Cheese Guard: socket holes must have at least min_wall_margin_mm from all outer surfaces.
+    3. Carves matching recessed sockets on Part 1 and Part 2 (both remain 100% flat on cut plane).
+    4. Generates companion printable dowel pins in alignment_pins.3mf.
+    """
+    import mathutils
+    plane_co = mathutils.Vector(plane_co)
+    plane_no = mathutils.Vector(plane_no).normalized()
+
+    # Build flat bulkhead on both parts first
+    build_flat_bulkhead(part1, plane_co, plane_no)
+    build_flat_bulkhead(part2, plane_co, plane_no)
+
+    max_dim = max(max(part1.dimensions), max(part2.dimensions))
+    scale_fac = 0.001 if max_dim < 10.0 else 1.0
+
+    r_socket = socket_radius_mm * scale_fac
+    d_socket = socket_depth_mm * scale_fac
+    margin_u = min_wall_margin_mm * scale_fac
+
+    # Find cut vertices on plane to identify safe zones
+    cut_verts = [v.co for v in part1.data.vertices if abs((v.co - plane_co).dot(plane_no)) < 2e-4]
+    if not cut_verts or len(cut_verts) < 6:
+        log("Cut vertices not clearly identified for sockets; skipping socket boolean.")
+        export_alignment_pins(output_3mf_path, output_obj_path, num_pins=num_pins)
+        return
+
+    # 2D projection on plane
+    if abs(plane_no.z) < 0.9:
+        tangent = plane_no.cross(mathutils.Vector((0, 0, 1))).normalized()
+    else:
+        tangent = plane_no.cross(mathutils.Vector((0, 1, 0))).normalized()
+    bitangent = plane_no.cross(tangent).normalized()
+
+    pts_2d = [mathutils.Vector(((v - plane_co).dot(tangent), (v - plane_co).dot(bitangent))) for v in cut_verts]
+    hull_idx = mathutils.geometry.convex_hull_2d(pts_2d)
+    hull_pts = [pts_2d[i] for i in hull_idx]
+
+    centroid_2d = sum(pts_2d, mathutils.Vector((0, 0))) / len(pts_2d)
+
+    # Determine major axis of the cut face
+    diffs = [p - centroid_2d for p in hull_pts]
+    span_u = max((abs(d.x) for d in diffs), default=0.05)
+    span_w = max((abs(d.y) for d in diffs), default=0.05)
+    major_dir = mathutils.Vector((1, 0)) if span_u >= span_w else mathutils.Vector((0, 1))
+    max_span = max(span_u, span_w)
+
+    # Generate candidate socket locations
+    candidates = []
+    if num_pins >= 2 and max_span > (r_socket + margin_u) * 4.0:
+        offset = max_span * 0.35
+        candidates.append(centroid_2d + major_dir * offset)
+        candidates.append(centroid_2d - major_dir * offset)
+    else:
+        candidates.append(centroid_2d)
+
+    # Validate each candidate against Swiss-Cheese margin
+    safe_sockets_3d = []
+    for cand in candidates:
+        clearance = min(((p - cand).length for p in hull_pts), default=0.0)
+        clearance_mm = clearance / scale_fac
+        if clearance >= (r_socket + margin_u):
+            pt_3d = plane_co + tangent * cand.x + bitangent * cand.y
+            safe_sockets_3d.append(pt_3d)
+            log(f"Safe socket position: clearance={clearance_mm:.1f}mm (>= {min_wall_margin_mm:.1f}mm margin required).")
         else:
-            log(f"Female socket carved cleanly into Part 2 ({len(part2.data.vertices)} verts).")
-            bpy.data.meshes.remove(part2_backup, do_unlink=True)
-    except Exception as e:
-        log(f"WARNING: Could not apply female socket boolean: {e}")
-        part2.data = part2_backup
+            # Fallback to centroid if clearance allows
+            c_clearance = min(((p - centroid_2d).length for p in hull_pts), default=0.0)
+            if c_clearance >= (r_socket + margin_u) and centroid_2d not in candidates:
+                pt_3d = plane_co + tangent * centroid_2d.x + bitangent * centroid_2d.y
+                safe_sockets_3d.append(pt_3d)
+                log(f"Candidate was close to edge ({clearance_mm:.1f}mm); adjusted to deep centroid (clearance={c_clearance/scale_fac:.1f}mm).")
+            else:
+                log(f"WARNING: Skipping socket to avoid puncturing outer sculpt (clearance {clearance_mm:.1f}mm < {min_wall_margin_mm:.1f}mm margin).")
+
+    if not safe_sockets_3d:
+        log("No positions satisfied the anti-swiss-cheese margin; skipping socket boolean to preserve model aesthetics.")
+        export_alignment_pins(output_3mf_path, output_obj_path, num_pins=num_pins)
+        return
+
+    # Carve sockets in both parts
+    quat = mathutils.Vector((0, 0, 1)).rotation_difference(plane_no)
+    euler = quat.to_euler()
+
+    for idx, s_pos in enumerate(safe_sockets_3d):
+        log(f"Carving dual socket #{idx+1} (radius={socket_radius_mm:.2f}mm, depth={socket_depth_mm:.1f}mm)...")
+        # Part 1 socket (recessed along -plane_no)
+        loc1 = s_pos - plane_no * (d_socket / 2.0)
+        bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=r_socket, depth=d_socket, location=loc1, rotation=euler)
+        cyl1 = bpy.context.active_object
+        mod1 = part1.modifiers.new(name=f'SocketDiff1_{idx}', type='BOOLEAN')
+        mod1.operation = 'DIFFERENCE'
+        mod1.object = cyl1
+        mod1.solver = 'EXACT'
+        bpy.context.view_layer.objects.active = part1
+        bpy.ops.object.modifier_apply(modifier=f'SocketDiff1_{idx}')
+        bpy.data.objects.remove(cyl1, do_unlink=True)
+
+        # Part 2 socket (recessed along +plane_no)
+        loc2 = s_pos + plane_no * (d_socket / 2.0)
+        bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=r_socket, depth=d_socket, location=loc2, rotation=euler)
+        cyl2 = bpy.context.active_object
+        mod2 = part2.modifiers.new(name=f'SocketDiff2_{idx}', type='BOOLEAN')
+        mod2.operation = 'DIFFERENCE'
+        mod2.object = cyl2
+        mod2.solver = 'EXACT'
+        bpy.context.view_layer.objects.active = part2
+        bpy.ops.object.modifier_apply(modifier=f'SocketDiff2_{idx}')
+        bpy.data.objects.remove(cyl2, do_unlink=True)
+
+    log(f"Dual alignment sockets carved successfully into both parts. Cut surfaces remain 100% planar.")
+    export_alignment_pins(output_3mf_path, output_obj_path, num_pins=len(safe_sockets_3d) * 2)
 
     # Triangulate and recalculate face normals for both parts
     for p in [part1, part2]:
@@ -404,75 +637,100 @@ def main():
     if args.parts_json and os.path.isfile(args.parts_json):
         log(f"MULTI-PART SPLIT: Processing parts from {args.parts_json}...")
         with open(args.parts_json, "r", encoding="utf-8") as pf:
-            parts_dict = json.load(pf)
+            raw_data = json.load(pf)
+
+        if isinstance(raw_data, dict) and "parts" in raw_data:
+            parts_dict = raw_data["parts"]
+            parts_planes = raw_data.get("planes", {})
+        else:
+            parts_dict = raw_data
+            parts_planes = {}
 
         log(f"Found {len(parts_dict)} staged parts to export.")
+        total_sockets_carved = 0
 
         for part_name, face_indices in parts_dict.items():
             safe_name = part_name.strip().replace(" ", "_")
+            planes_for_part = parts_planes.get(part_name) or parts_planes.get(safe_name) or []
             log(f"Extracting part '{safe_name}'...")
-
-            keep_set = set()
-            for item in face_indices:
-                if isinstance(item, list) and len(item) == 2:
-                    keep_set.update(range(item[0], item[1] + 1))
-                else:
-                    keep_set.add(item)
-
-            log(f"Part '{safe_name}': {len(keep_set)} faces to retain.")
 
             part_obj = obj.copy()
             part_mesh_data = obj.data.copy()
             part_obj.data = part_mesh_data
             bpy.context.collection.objects.link(part_obj)
 
-            bm = bmesh.new()
-            bm.from_mesh(part_obj.data)
+            if planes_for_part:
+                log(f"Part '{safe_name}': Applying {len(planes_for_part)} geometric planar cut(s) with flat bulkheads...")
+                for cp in planes_for_part:
+                    p_co = (float(cp["point"][0]), float(cp["point"][1]), float(cp["point"][2]))
+                    p_no = (float(cp["normal"][0]), float(cp["normal"][1]), float(cp["normal"][2]))
+                    bisect_mesh(part_obj, p_co, p_no, clear_outer=True, clear_inner=False, cap_cut=False)
+                    if args.split_cap:
+                        build_flat_bulkhead(part_obj, p_co, p_no)
+                    if args.add_pegs and args.split_cap:
+                        s_carved = carve_part_sockets(
+                            part_obj, p_co, p_no,
+                            socket_radius_mm=args.peg_radius if args.peg_radius > 0 else 1.65,
+                            socket_depth_mm=args.peg_height if args.peg_height > 0 else 5.0,
+                            min_wall_margin_mm=2.0
+                        )
+                        total_sockets_carved += len(s_carved)
+            else:
+                keep_set = set()
+                for item in face_indices:
+                    if isinstance(item, list) and len(item) == 2:
+                        keep_set.update(range(item[0], item[1] + 1))
+                    else:
+                        keep_set.add(item)
 
-            # 1. Identify ONLY the real cut seam edges (edges between keep_set and del_faces)
-            # NEVER treat original model boundary openings (eyes, nostrils, filigree cutouts) as cut seams!
-            cut_seam_edges = set()
-            for e in bm.edges:
-                if len(e.link_faces) == 2:
-                    f0, f1 = e.link_faces
-                    if (f0.index in keep_set) != (f1.index in keep_set):
-                        cut_seam_edges.add(e)
+                log(f"Part '{safe_name}': {len(keep_set)} faces to retain (Lasso mode).")
 
-            del_faces = [f for f in bm.faces if f.index not in keep_set]
-            bmesh.ops.delete(bm, geom=del_faces, context='FACES')
+                bm = bmesh.new()
+                bm.from_mesh(part_obj.data)
 
-            # Cap boundaries if requested - ONLY on the actual cut seam edges!
-            if args.split_cap and cut_seam_edges:
-                try:
-                    valid_seam_edges = [e for e in cut_seam_edges if e.is_valid and e.is_boundary]
-                    if valid_seam_edges:
-                        log(f"Attempting cut-seam capping on {len(valid_seam_edges)} seam edges for '{safe_name}'...")
-                        color_layer = bm.loops.layers.color.active
-                        seam_colors = {}
-                        if color_layer:
-                            for e in valid_seam_edges:
-                                for l in e.link_loops:
-                                    seam_colors[l.vert] = l[color_layer]
-                        res = bmesh.ops.edgenet_fill(bm, edges=valid_seam_edges)
-                        new_faces = res.get('faces', [])
-                        if color_layer and new_faces:
-                            avg_c = (0.8, 0.8, 0.8, 1.0)
-                            if seam_colors:
-                                c_arr = np.array(list(seam_colors.values()))
-                                avg_c = tuple(np.mean(c_arr, axis=0))
-                            for nf in new_faces:
-                                for l in nf.loops:
-                                    l[color_layer] = seam_colors.get(l.vert, avg_c)
-                except Exception as cap_err:
-                    log(f"Cut-seam capping skipped for '{safe_name}': {cap_err}")
+                # 1. Identify ONLY the real cut seam edges (edges between keep_set and del_faces)
+                cut_seam_edges = set()
+                for e in bm.edges:
+                    if len(e.link_faces) == 2:
+                        f0, f1 = e.link_faces
+                        if (f0.index in keep_set) != (f1.index in keep_set):
+                            cut_seam_edges.add(e)
 
-            # ALWAYS triangulate all faces so slicers never encounter N-gons (> 4 vertices)
-            bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
-            bmesh.ops.dissolve_degenerate(bm, dist=1e-5, edges=bm.edges[:])
-            bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+                del_faces = [f for f in bm.faces if f.index not in keep_set]
+                bmesh.ops.delete(bm, geom=del_faces, context='FACES')
 
-            bm.to_mesh(part_obj.data)
-            bm.free()
+                # Cap boundaries if requested - ONLY on the actual cut seam edges!
+                if args.split_cap and cut_seam_edges:
+                    try:
+                        valid_seam_edges = [e for e in cut_seam_edges if e.is_valid and e.is_boundary]
+                        if valid_seam_edges:
+                            log(f"Attempting cut-seam capping on {len(valid_seam_edges)} seam edges for '{safe_name}'...")
+                            color_layer = bm.loops.layers.color.active
+                            seam_colors = {}
+                            if color_layer:
+                                for e in valid_seam_edges:
+                                    for l in e.link_loops:
+                                        seam_colors[l.vert] = l[color_layer]
+                            res = bmesh.ops.edgenet_fill(bm, edges=valid_seam_edges)
+                            new_faces = res.get('faces', [])
+                            if color_layer and new_faces:
+                                avg_c = (0.8, 0.8, 0.8, 1.0)
+                                if seam_colors:
+                                    c_arr = np.array(list(seam_colors.values()))
+                                    avg_c = tuple(np.mean(c_arr, axis=0))
+                                for nf in new_faces:
+                                    for l in nf.loops:
+                                        l[color_layer] = seam_colors.get(l.vert, avg_c)
+                    except Exception as cap_err:
+                        log(f"Cut-seam capping skipped for '{safe_name}': {cap_err}")
+
+                # ALWAYS triangulate all faces so slicers never encounter N-gons (> 4 vertices)
+                bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
+                bmesh.ops.dissolve_degenerate(bm, dist=1e-5, edges=bm.edges[:])
+                bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+                bm.to_mesh(part_obj.data)
+                bm.free()
 
             # Optional Inward Solidify for open shells
             if args.solidify_mm > 0.0:
@@ -508,6 +766,10 @@ def main():
             bpy.data.objects.remove(part_obj, do_unlink=True)
             bpy.data.meshes.remove(part_mesh_data, do_unlink=True)
             log(f"Part '{safe_name}' exported and memory freed.")
+
+        if args.add_pegs:
+            num_pins = max(4, total_sockets_carved) if total_sockets_carved > 0 else len(parts_dict) * 2
+            export_alignment_pins(args.output_3mf, args.output_obj, num_pins=num_pins)
 
     # 7. Check if Planar Cut is requested
     elif (args.plane_point and args.plane_normal) or (args.split_axis != "none"):
@@ -566,7 +828,28 @@ def main():
                 bpy.ops.object.modifier_apply(modifier='Solidify')
 
         if args.add_pegs and args.split_cap:
-            add_alignment_pegs_and_sockets(part1, part2, plane_co, plane_no, peg_radius=args.peg_radius, peg_height=args.peg_height)
+            add_alignment_sockets_and_dowel_pins(
+                part1, part2, plane_co, plane_no,
+                output_3mf_path=args.output_3mf,
+                output_obj_path=args.output_obj,
+                socket_radius_mm=args.peg_radius if args.peg_radius > 0 else 1.65,
+                socket_depth_mm=args.peg_height if args.peg_height > 0 else 5.0,
+                min_wall_margin_mm=2.0,
+                num_pins=2
+            )
+
+        # Optional decimation on split parts
+        for p, p_name in ((part1, "Part 1"), (part2, "Part 2")):
+            if args.decimate_ratio < 0.999 or (args.target_triangles > 0 and len(p.data.polygons) > args.target_triangles):
+                ratio = args.decimate_ratio
+                if args.target_triangles > 0 and len(p.data.polygons) > args.target_triangles:
+                    ratio = args.target_triangles / float(len(p.data.polygons))
+                log(f"Decimating {p_name} from {len(p.data.polygons)} to target ratio {ratio:.3f}...")
+                mod = p.modifiers.new(name='Decimate', type='DECIMATE')
+                mod.ratio = float(ratio)
+                mod.use_collapse_triangulate = True
+                bpy.context.view_layer.objects.active = p
+                bpy.ops.object.modifier_apply(modifier='Decimate')
 
         p1_obj = split_path(args.output_obj, "part1")
         p2_obj = split_path(args.output_obj, "part2")

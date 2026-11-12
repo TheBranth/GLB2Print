@@ -571,11 +571,14 @@
               </div>
             </div>
 
-            <!-- Snap Peg Option -->
+            <!-- Sockets & Dowel Pins Option -->
             <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
-              <label class="check-row" title="Adds snap-fit male alignment pin on Part 1 and matching 0.2mm tolerance socket hole on Part 2">
-                <input type="checkbox" id="chk-add-pegs" checked> 🧩 Add Snap Pegs & Sockets (Snap-fit)
+              <label class="check-row" title="Carves recessed female sockets on flat cut surfaces and exports alignment_pins.3mf. Keeps parts 100% flat on print bed with anti-puncture wall margin.">
+                <input type="checkbox" id="chk-add-pegs" checked> 🧩 Alignment Sockets + Printable Pins (Flat-Bed)
               </label>
+              <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px; line-height: 1.3;">
+                Both parts stay flat on the bed with recessed sockets (anti-swiss-cheese guard &ge; 2mm margin). Generates companion <code>alignment_pins.3mf</code>.
+              </div>
             </div>
           </div>
 
@@ -1324,12 +1327,24 @@
       }
       const partIdx = stagedParts.length;
       const pal = PART_PALETTE[partIdx % PART_PALETTE.length];
+      const remainingPlanes = [];
+      stagedParts.forEach(p => {
+        if (p.cut_planes && p.cut_planes.length > 0) {
+          p.cut_planes.forEach(cp => {
+            remainingPlanes.push({
+              point: [cp.point[0], cp.point[1], cp.point[2]],
+              normal: [-cp.normal[0], -cp.normal[1], -cp.normal[2]]
+            });
+          });
+        }
+      });
       stagedParts.push({
         id: Date.now(),
         name: `Part_${partIdx + 1}_Remaining`,
         hex: pal.hex,
         rgb: pal.rgb,
-        faces: new Set(unassigned)
+        faces: new Set(unassigned),
+        cut_planes: remainingPlanes
       });
       refreshPartsDeckUI();
       renderPartTints();
@@ -1651,7 +1666,11 @@
         name: `Part_${partIdx + 1}`,
         hex: pal.hex,
         rgb: pal.rgb,
-        faces: new Set(sliceFaces)
+        faces: new Set(sliceFaces),
+        cut_planes: [{
+          point: [planePos.x, -planePos.z, planePos.y],
+          normal: [planeNo.x, -planeNo.z, planeNo.y]
+        }]
       };
       stagedParts.push(part);
       if (planarSubMode === 'knife') resetKnifePoints();
@@ -1915,14 +1934,19 @@
         split_mode: currentSplitMode
       };
 
+      const addPegs = document.getElementById('chk-add-pegs') ? document.getElementById('chk-add-pegs').checked : false;
+      payload.add_pegs = addPegs;
+
       if (stagedParts.length > 0) {
         payload.parts = {};
+        payload.parts_planes = {};
         stagedParts.forEach(p => {
           payload.parts[p.name] = compressIndicesToRanges(p.faces);
+          if (p.cut_planes && p.cut_planes.length > 0) {
+            payload.parts_planes[p.name] = p.cut_planes;
+          }
         });
       } else if (currentSplitMode === 'planar') {
-        const addPegs = document.getElementById('chk-add-pegs') ? document.getElementById('chk-add-pegs').checked : false;
-        payload.add_pegs = addPegs;
 
         let pPos = new THREE.Vector3();
         let pNo = new THREE.Vector3();
