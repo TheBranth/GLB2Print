@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument("--add-pegs", action="store_true", help="Add snap-fit male peg & female socket at cut interface")
     parser.add_argument("--peg-radius", type=float, default=2.0, help="Radius of alignment peg in mm (default: 2.0)")
     parser.add_argument("--peg-height", type=float, default=5.0, help="Height of alignment peg in mm (default: 5.0)")
-    parser.add_argument("--solidify-mm", type=float, default=0.0, help="Inward wall thickness in mm for open shells (0.0=disabled)")
+    parser.add_argument("--solidify-mm", type=float, default=0.0, help="Print volume mode: < 0 = Full Solid (slicer infill), > 0 = hollow shell wall mm, 0 = raw mesh")
     parser.add_argument("--split-cap", action="store_true", default=True, help="Cap cut surfaces for watertight printing")
     parser.add_argument("--no-split-cap", dest="split_cap", action="store_false", help="Do not cap cut surfaces")
 
@@ -130,23 +130,22 @@ def export_object(obj, obj_filepath, mf_filepath, ground_z=False):
             mesh.vertices.foreach_set('co', verts_reshaped.flatten())
             mesh.update()
 
-    num_loops = len(mesh.loops)
-    color_layer = mesh.color_attributes.active
-    if not color_layer and len(mesh.color_attributes) > 0:
-        color_layer = mesh.color_attributes.get('Color') or mesh.color_attributes[0]
-        mesh.color_attributes.active = color_layer
-
-    if color_layer:
-        raw_c = np.empty(num_loops * 4, dtype=np.float32)
-        color_layer.data.foreach_get('color', raw_c)
-        active_loop_colors = raw_c.reshape((num_loops, 4))
-    else:
-        active_loop_colors = np.ones((num_loops, 4), dtype=np.float32)
-
     if mf_filepath:
+        num_loops = len(mesh.loops)
+        color_layer = mesh.color_attributes.get('Color') or mesh.color_attributes.active_color
+        if color_layer and getattr(color_layer, 'data_type', None) in ('BYTE_COLOR', 'FLOAT_COLOR'):
+            mesh.color_attributes.active_color = color_layer
+            raw_c = np.empty(num_loops * 4, dtype=np.float32)
+            color_layer.data.foreach_get('color', raw_c)
+            active_loop_colors = raw_c.reshape((num_loops, 4))
+        else:
+            active_loop_colors = np.ones((num_loops, 4), dtype=np.float32)
         export_3mf(mf_filepath, mesh, active_loop_colors)
 
     if obj_filepath:
+        color_layer = mesh.color_attributes.get('Color')
+        if color_layer and getattr(color_layer, 'data_type', None) in ('BYTE_COLOR', 'FLOAT_COLOR'):
+            mesh.color_attributes.active_color = color_layer
         t_obj = time.time()
         for o in bpy.data.objects:
             o.select_set(o == obj)
@@ -156,7 +155,9 @@ def export_object(obj, obj_filepath, mf_filepath, ground_z=False):
             export_colors=True,
             export_materials=False,
             export_selected_objects=True,
-            export_triangulated_mesh=True
+            export_triangulated_mesh=True,
+            forward_axis='Y',
+            up_axis='Z'
         )
         log(f"Exported OBJ: {os.path.basename(obj_filepath)} in {time.time()-t_obj:.2f}s ({os.path.getsize(obj_filepath) / (1024*1024):.2f} MB)")
 
@@ -298,84 +299,185 @@ def lay_flat_on_cut_plane(obj, cut_planes):
     obj.data.update()
     log(f"Oriented '{obj.name}' flat onto cut plane (outward normal rotated to -Z).")
 
-def build_flat_bulkhead(obj, plane_co, plane_no):
+def build_bulkhead_slab(part_obj, plane_co, plane_no, keep_sign=1.0, thickness_mm=2.5):
     """
-    Builds a flat 2D planar bulkhead closing the cut cross-section
-    so the piece can be printed completely flat on the build plate.
+    Closes the hollow interior on the cut plane with a real solid flat bulkhead floor
+    extruded `thickness_mm` inward along `keep_sign * plane_no` and MANIFOLD-unioned onto `part_obj`.
+    Clusters cut vertices by 2D proximity so separate islands don't bridge empty air, and gently
+    tapers the interior top rim inward so the slab never protrudes through sloped outer walls.
     """
     import mathutils
-    plane_co = mathutils.Vector(plane_co)
-    plane_no = mathutils.Vector(plane_no).normalized()
+    p_co = mathutils.Vector(plane_co)
+    p_no = mathutils.Vector(plane_no).normalized()
+    slab_dir = (p_no * keep_sign).normalized()
+
+    max_dim = max(part_obj.dimensions)
+    scale_fac = 0.001 if max_dim < 10.0 else 1.0
+    T = max(0.4, float(thickness_mm)) * scale_fac
+    cluster_radius = 12.0 * scale_fac
+    min_span = 10.0 * scale_fac
+    inset_u = min(2.0 * scale_fac, T)
+
+    if abs(p_no.z) < 0.9:
+        t1 = p_no.cross(mathutils.Vector((0.0, 0.0, 1.0))).normalized()
+    else:
+        t1 = p_no.cross(mathutils.Vector((0.0, 1.0, 0.0))).normalized()
+    t2 = p_no.cross(t1).normalized()
 
     bm = bmesh.new()
-    bm.from_mesh(obj.data)
+    bm.from_mesh(part_obj.data)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
 
-    cut_verts = [v for v in bm.verts if abs((v.co - plane_co).dot(plane_no)) < 2e-4]
+    cut_verts = [v for v in bm.verts if abs((v.co - p_co).dot(p_no)) < 2e-4]
     if len(cut_verts) < 6:
         bm.free()
         return
+    cut_vert_set = set(cut_verts)
+    vert_to_cidx = {v: idx for idx, v in enumerate(cut_verts)}
 
-    # 2D projection on the cut plane
-    if abs(plane_no.z) < 0.9:
-        tangent = plane_no.cross(mathutils.Vector((0, 0, 1))).normalized()
-    else:
-        tangent = plane_no.cross(mathutils.Vector((0, 1, 0))).normalized()
-    bitangent = plane_no.cross(tangent).normalized()
+    # Sample seam color for the new bulkhead faces
+    seam_color = (0.8, 0.8, 0.8, 1.0)
+    color_layer = bm.loops.layers.color.active
+    has_color = color_layer is not None
+    if has_color:
+        cols = []
+        for v in cut_verts[:200]:
+            for l in v.link_loops:
+                try:
+                    cols.append(l[color_layer][:4])
+                except Exception:
+                    pass
+        if cols:
+            seam_color = tuple(float(x) for x in np.mean(np.array(cols), axis=0))
 
-    pts_2d = [mathutils.Vector(((v.co - plane_co).dot(tangent), (v.co - plane_co).dot(bitangent))) for v in cut_verts]
-    hull_indices = mathutils.geometry.convex_hull_2d(pts_2d)
+    # Cluster cut vertices via BOTH cut-plane mesh edge connectivity AND 3D proximity
+    # so low-poly long edges (e.g. a 40mm cube) stay unified while detached islands stay separate
+    kd = mathutils.kdtree.KDTree(len(cut_verts))
+    for idx, v in enumerate(cut_verts):
+        kd.insert(v.co, idx)
+    kd.balance()
 
-    if len(hull_indices) >= 3:
-        hull_verts = [cut_verts[i] for i in hull_indices]
-
-        # Inherit vertex color from seam
-        color_layer = bm.loops.layers.color.active
-        seam_color = (0.8, 0.8, 0.8, 1.0)
-        if color_layer:
-            cols = []
-            for v in hull_verts:
-                for l in v.link_loops:
-                    try:
-                        cols.append(l[color_layer])
-                    except Exception:
-                        pass
-            if cols:
-                c_mat = np.array([c[:4] for c in cols])
-                seam_color = tuple(np.mean(c_mat, axis=0))
-
-        try:
-            f = bm.faces.new(hull_verts)
-            if color_layer:
-                for l in f.loops:
-                    l[color_layer] = seam_color
-            bmesh.ops.triangulate(bm, faces=[f], quad_method='BEAUTY', ngon_method='BEAUTY')
-            log(f"Flat bulkhead built on '{obj.name}' with {len(hull_verts)} perimeter vertices.")
-        except Exception as e:
-            hull_edges = []
-            for i in range(len(hull_verts)):
-                v1 = hull_verts[i]
-                v2 = hull_verts[(i + 1) % len(hull_verts)]
-                e = bm.edges.get((v1, v2)) or bm.edges.new((v1, v2))
-                hull_edges.append(e)
-            res = bmesh.ops.edgenet_fill(bm, edges=hull_edges)
-            new_faces = res.get('faces', [])
-            if color_layer and new_faces:
-                for nf in new_faces:
-                    for l in nf.loops:
-                        l[color_layer] = seam_color
-
-        bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
-        bmesh.ops.dissolve_degenerate(bm, dist=1e-5, edges=bm.edges[:])
-        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
-
-    bm.to_mesh(obj.data)
+    visited = [False] * len(cut_verts)
+    clusters = []
+    for i in range(len(cut_verts)):
+        if visited[i]:
+            continue
+        comp = []
+        stack = [i]
+        visited[i] = True
+        while stack:
+            cur = stack.pop()
+            v_cur = cut_verts[cur]
+            comp.append(v_cur.co.copy())
+            for e in v_cur.link_edges:
+                other = e.other_vert(v_cur)
+                if other in cut_vert_set:
+                    oi = vert_to_cidx[other]
+                    if not visited[oi]:
+                        visited[oi] = True
+                        stack.append(oi)
+            for _, nbr_idx, _ in kd.find_range(v_cur.co, cluster_radius):
+                if not visited[nbr_idx]:
+                    visited[nbr_idx] = True
+                    stack.append(nbr_idx)
+        if len(comp) >= 6:
+            clusters.append(comp)
     bm.free()
 
+    slab_bm = bmesh.new()
+    slabs_built = 0
+    for pts_3d in clusters:
+        pts_2d = [mathutils.Vector(((p - p_co).dot(t1), (p - p_co).dot(t2))) for p in pts_3d]
+        hull_idx = mathutils.geometry.convex_hull_2d(pts_2d)
+        if len(hull_idx) < 3:
+            continue
+
+        # Deduplicate near-coincident hull vertices to keep slab clean
+        raw_h2d = [pts_2d[idx] for idx in hull_idx]
+        h2d = []
+        for hp in raw_h2d:
+            if not h2d or (hp - h2d[-1]).length >= 0.2 * scale_fac:
+                h2d.append(hp)
+        if len(h2d) > 2 and (h2d[0] - h2d[-1]).length < 0.2 * scale_fac:
+            h2d.pop()
+        if len(h2d) < 3:
+            continue
+
+        span = max(max(p.x for p in h2d) - min(p.x for p in h2d),
+                   max(p.y for p in h2d) - min(p.y for p in h2d))
+        if span < min_span:
+            continue
+
+        hull_pts_3d = [p_co + t1 * p.x + t2 * p.y for p in h2d]
+        center_3d = sum(hull_pts_3d, mathutils.Vector((0.0, 0.0, 0.0))) / len(hull_pts_3d)
+
+        bot_vs = [slab_bm.verts.new(p) for p in hull_pts_3d]
+        top_vs = []
+        for p in hull_pts_3d:
+            inward = center_3d - p
+            if inward.length > 1e-6:
+                p_in = p + inward.normalized() * min(inset_u, inward.length * 0.25)
+            else:
+                p_in = p
+            top_vs.append(slab_bm.verts.new(p_in + slab_dir * T))
+
+        try:
+            slab_bm.faces.new(list(reversed(bot_vs)))
+            slab_bm.faces.new(top_vs)
+            n_h = len(hull_pts_3d)
+            for i in range(n_h):
+                j = (i + 1) % n_h
+                slab_bm.faces.new([bot_vs[i], bot_vs[j], top_vs[j], top_vs[i]])
+            slabs_built += 1
+        except Exception as e:
+            log(f"Skipping degenerate bulkhead island on '{part_obj.name}': {e}")
+
+    if slabs_built == 0:
+        slab_bm.free()
+        return
+
+    bmesh.ops.recalc_face_normals(slab_bm, faces=slab_bm.faces[:])
+    bmesh.ops.triangulate(slab_bm, faces=slab_bm.faces[:])
+
+    slab_mesh = bpy.data.meshes.new('BulkheadSlabMesh')
+    slab_bm.to_mesh(slab_mesh)
+    slab_bm.free()
+
+    if has_color and len(slab_mesh.loops) > 0:
+        ca = slab_mesh.color_attributes.new(name='Color', type='BYTE_COLOR', domain='CORNER')
+        ca.data.foreach_set('color', np.tile(np.array(seam_color, dtype=np.float32), len(slab_mesh.loops)))
+        slab_mesh.color_attributes.active = ca
+
+    slab_obj = bpy.data.objects.new('BulkheadSlab', slab_mesh)
+    bpy.context.collection.objects.link(slab_obj)
+
+    for solver in ('MANIFOLD', 'FLOAT'):
+        mod = part_obj.modifiers.new(name='UnionBulkhead', type='BOOLEAN')
+        mod.operation = 'UNION'
+        mod.object = slab_obj
+        mod.solver = solver
+        bpy.context.view_layer.objects.active = part_obj
+        try:
+            bpy.ops.object.modifier_apply(modifier='UnionBulkhead')
+            log(f"Built {thickness_mm:.1f}mm flat bulkhead floor ({slabs_built} island(s), {solver}) on '{part_obj.name}'.")
+            break
+        except Exception as e:
+            log(f"Bulkhead union ({solver}) failed on '{part_obj.name}': {e}")
+            if 'UnionBulkhead' in part_obj.modifiers:
+                part_obj.modifiers.remove(part_obj.modifiers['UnionBulkhead'])
+
+    bpy.data.objects.remove(slab_obj, do_unlink=True)
+    bpy.data.meshes.remove(slab_mesh, do_unlink=True)
+
 def _has_solid_depth(check_obj, pt, ray_dir, r_cand, min_depth, scale_fac, t1, t2):
-    """Returns True if `check_obj` has >= `min_depth` solid material behind the entire socket circle."""
-    import mathutils
+    """Returns True if `check_obj` has >= `min_depth` solid material behind the entire cylinder circle (center + 8 perimeter rays)."""
+    import mathutils, math
     eps = 0.05 * scale_fac
-    offsets = [mathutils.Vector((0.0, 0.0, 0.0)), t1 * r_cand, -t1 * r_cand, t2 * r_cand, -t2 * r_cand]
+    offsets = [mathutils.Vector((0.0, 0.0, 0.0))]
+    for k in range(8):
+        ang = k * (math.pi * 0.25)
+        offsets.append(t1 * (math.cos(ang) * r_cand) + t2 * (math.sin(ang) * r_cand))
     for off in offsets:
         origin = pt + off + ray_dir * eps
         hit, hit_loc, _, _ = check_obj.ray_cast(origin, ray_dir)
@@ -386,12 +488,12 @@ def _has_solid_depth(check_obj, pt, ray_dir, r_cand, min_depth, scale_fac, t1, t
     return True
 
 
-def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=1.15, socket_depth_mm=1.8,
+def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=2.0, socket_depth_mm=3.0,
                               num_pins=2, sign=1.0, mate_obj=None):
     """
-    Finds safe socket positions centered inside the solidified cut rim using a KDTree
-    on the cut-face boundary edges plus 5-ray solid depth checks on both mating sides
-    so sockets sit in the thickest rim regions without puncturing inner/outer walls.
+    Finds safe socket positions inside a solid planar cut cross-section using a KDTree on
+    cut-face boundary edges plus a 9-ray outer-shell containment check so cylindrical sockets
+    maintain >= 2.0mm radial wall clearance and >= 1.5mm behind-socket solid backing.
     """
     import mathutils
     plane_co = mathutils.Vector(plane_co)
@@ -400,10 +502,12 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=1.1
 
     max_dim = max(part_obj.dimensions)
     scale_fac = 0.001 if max_dim < 10.0 else 1.0
-    r_max = min(socket_radius_mm, 1.15) * scale_fac
-    min_half_width = 1.05 * scale_fac  # Need >= ~2.1mm wall thickness for a socket
-    clamped_depth = min(float(socket_depth_mm), 1.8)
-    min_solid_depth = (clamped_depth + 0.5) * scale_fac  # Require >= 0.5mm solid backing
+    r_max = min(max(socket_radius_mm, 1.2), 2.5) * scale_fac
+    r_min = 1.2 * scale_fac
+    wall_margin = 2.0 * scale_fac  # Strict >= 2.0mm solid perimeter margin around socket
+    min_half_width = r_min + wall_margin
+    clamped_depth = min(float(socket_depth_mm), 3.0)
+    min_solid_depth = (clamped_depth + 1.5) * scale_fac  # Require >= 1.5mm solid backing
 
     bm = bmesh.new()
     bm.from_mesh(part_obj.data)
@@ -421,13 +525,16 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=1.1
 
     plane_face_set = set(plane_faces)
     boundary_pts = []
+    sample_step = 0.5 * scale_fac
     for f in plane_faces:
         for e in f.edges:
             linked_in_plane = sum(1 for lf in e.link_faces if lf in plane_face_set)
             if linked_in_plane == 1:
-                boundary_pts.append(e.verts[0].co.copy())
-                boundary_pts.append(e.verts[1].co.copy())
-                boundary_pts.append((e.verts[0].co + e.verts[1].co) * 0.5)
+                v0, v1 = e.verts[0].co, e.verts[1].co
+                elen = (v1 - v0).length
+                n_seg = max(2, min(128, int(elen / sample_step) + 1))
+                for s in range(n_seg + 1):
+                    boundary_pts.append(v0.lerp(v1, s / float(n_seg)))
 
     if len(boundary_pts) < 3:
         bm.free()
@@ -438,6 +545,18 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=1.1
         kd.insert(pt, i)
     kd.balance()
 
+    if abs(plane_no.z) < 0.9:
+        t1 = plane_no.cross(mathutils.Vector((0.0, 0.0, 1.0))).normalized()
+    else:
+        t1 = plane_no.cross(mathutils.Vector((0.0, 1.0, 0.0))).normalized()
+    t2 = plane_no.cross(t1).normalized()
+
+    us = [(p - plane_co).dot(t1) for p in boundary_pts]
+    ws = [(p - plane_co).dot(t2) for p in boundary_pts]
+    u_min, u_max = min(us), max(us)
+    w_min, w_max = min(ws), max(ws)
+    max_span = max(u_max - u_min, w_max - w_min)
+
     candidates = []
     for f in plane_faces:
         c = f.calc_center_median()
@@ -447,45 +566,56 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=1.1
 
     bm.free()
 
+    steps = 16
+    for iu in range(1, steps):
+        u = u_min + (u_max - u_min) * (iu / float(steps))
+        for iw in range(1, steps):
+            w = w_min + (w_max - w_min) * (iw / float(steps))
+            pt = plane_co + t1 * u + t2 * w
+            hit, loc, _, _ = part_obj.closest_point_on_mesh(pt, distance=0.5 * scale_fac)
+            if hit and (loc - pt).length < 0.25 * scale_fac:
+                _, _, dist = kd.find(pt)
+                if dist >= min_half_width:
+                    candidates.append((dist, pt))
+
     if not candidates:
-        log(f"WARNING: No rim region >= {min_half_width/scale_fac:.1f}mm half-width on '{part_obj.name}'; skipping sockets.")
+        log(f"WARNING: No solid region >= {min_half_width/scale_fac:.1f}mm half-width on '{part_obj.name}'; skipping sockets.")
         return [], 0.0
 
     candidates.sort(key=lambda x: x[0], reverse=True)
-    if abs(plane_no.z) < 0.9:
-        t1 = plane_no.cross(mathutils.Vector((0.0, 0.0, 1.0))).normalized()
-    else:
-        t1 = plane_no.cross(mathutils.Vector((0.0, 1.0, 0.0))).normalized()
-    t2 = plane_no.cross(t1).normalized()
-
-    min_sep = 12.0 * scale_fac
+    min_sep = max(12.0 * scale_fac, max_span * 0.30)
     chosen = []
     chosen_dists = []
 
-    for dist, pt in candidates:
-        if all((pt - prev).length >= min_sep for prev in chosen):
-            r_cand = min(r_max, dist * 0.58)
-            if not _has_solid_depth(part_obj, pt, ray_dir, r_cand, min_solid_depth, scale_fac, t1, t2):
-                continue
-            if mate_obj is not None and not _has_solid_depth(mate_obj, pt, -ray_dir, r_cand, min_solid_depth, scale_fac, t1, t2):
-                continue
-            chosen.append(pt)
-            chosen_dists.append(dist)
+    for sep_target in (min_sep, 12.0 * scale_fac):
+        for dist, pt in candidates:
             if len(chosen) >= num_pins:
                 break
+            if all((pt - prev).length >= sep_target for prev in chosen):
+                r_cand = min(r_max, dist - wall_margin)
+                if r_cand < r_min:
+                    continue
+                if not _has_solid_depth(part_obj, pt, ray_dir, r_cand, min_solid_depth, scale_fac, t1, t2):
+                    continue
+                if mate_obj is not None and not _has_solid_depth(mate_obj, pt, -ray_dir, r_cand, min_solid_depth, scale_fac, t1, t2):
+                    continue
+                chosen.append(pt)
+                chosen_dists.append(dist)
+        if len(chosen) >= num_pins:
+            break
 
     if not chosen:
-        log(f"WARNING: No rim region passed 5-ray >= {min_solid_depth/scale_fac:.1f}mm solid depth guard on '{part_obj.name}'; skipping sockets.")
+        log(f"WARNING: No region passed 9-ray >= {min_solid_depth/scale_fac:.1f}mm outer-shell guard on '{part_obj.name}'; skipping sockets.")
         return [], 0.0
 
     min_chosen_dist = min(chosen_dists)
-    r_eff = min(r_max, min_chosen_dist * 0.58)
+    r_eff = min(r_max, min_chosen_dist - wall_margin)
     for idx, (pt, d) in enumerate(zip(chosen, chosen_dists)):
-        log(f"Safe rim socket #{idx+1} on '{part_obj.name}': half_width={d/scale_fac:.2f}mm, r={r_eff/scale_fac:.2f}mm.")
+        log(f"Safe solid socket #{idx+1} on '{part_obj.name}': margin={(d-r_eff)/scale_fac:.2f}mm, r={r_eff/scale_fac:.2f}mm.")
     return chosen, r_eff
 
 
-def carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_depth_mm=1.8, sign=1.0):
+def carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_depth_mm=3.0, sign=1.0):
     """
     Carves recessed female cylindrical sockets into `part_obj` at `sockets_3d` along `sign * plane_no`.
     Uses MANIFOLD boolean solver (with FLOAT fallback) and extends cutter 0.2mm into empty air.
@@ -498,7 +628,7 @@ def carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_
     max_dim = max(part_obj.dimensions)
     scale_fac = 0.001 if max_dim < 10.0 else 1.0
 
-    clamped_depth_mm = min(float(socket_depth_mm), 1.8)
+    clamped_depth_mm = min(float(socket_depth_mm), 3.0)
     d_socket = clamped_depth_mm * scale_fac
     air_overlap = 0.2 * scale_fac
 
@@ -534,10 +664,10 @@ def carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_
     return sockets_3d
 
 
-def carve_part_sockets(part_obj, plane_co, plane_no, socket_radius_mm=1.15, socket_depth_mm=1.8,
+def carve_part_sockets(part_obj, plane_co, plane_no, socket_radius_mm=2.0, socket_depth_mm=3.0,
                        num_pins=2, cached_sockets=None, mate_obj=None):
     """
-    Carves recessed female cylindrical sockets into the solidified cut rim of a part.
+    Carves recessed female cylindrical sockets into the solid cut face of a part.
     If `cached_sockets`=(sockets_3d, r_socket) is provided from a mating half, reuses the exact
     3D coordinates and radius so pins align across the seam.
     """
@@ -604,7 +734,9 @@ def export_alignment_pins(output_3mf_path, output_obj_path, num_pins=4, pin_radi
             export_colors=False,
             export_materials=False,
             export_selected_objects=True,
-            export_triangulated_mesh=True
+            export_triangulated_mesh=True,
+            forward_axis='Y',
+            up_axis='Z'
         )
         log(f"Exported printable dowels: alignment_pins.obj ({num_pins} pins)")
 
@@ -612,10 +744,10 @@ def export_alignment_pins(output_3mf_path, output_obj_path, num_pins=4, pin_radi
     bpy.data.meshes.remove(mesh, do_unlink=True)
 
 def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, output_3mf_path, output_obj_path,
-                                        socket_radius_mm=1.15, socket_depth_mm=1.8, num_pins=2):
+                                        socket_radius_mm=2.0, socket_depth_mm=3.0, num_pins=2):
     """
-    1. Finds thick rim regions on the pre-solidified & bisected cut face using KDTree + 5-ray depth guard.
-    2. Carves matching recessed sockets (clamped <= 1.8mm depth) on Part 1 (-plane_no) and Part 2 (+plane_no).
+    1. Finds safe regions on the solid cut cross-section using KDTree + 9-ray outer-shell guard.
+    2. Carves matching recessed sockets (clamped <= 3.0mm depth) on Part 1 (-plane_no) and Part 2 (+plane_no).
     3. Generates companion printable dowel pins sized to match the carved sockets.
     """
     max_dim = max(max(part1.dimensions), max(part2.dimensions))
@@ -630,11 +762,10 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
         mate_obj=part2
     )
     if not sockets_3d:
-        log("No thick rim positions found for sockets; skipping socket boolean to preserve model walls.")
-        export_alignment_pins(output_3mf_path, output_obj_path, num_pins=num_pins)
+        log("No safe solid regions passed >= 2mm outer-shell guard; skipping socket carving.")
         return
 
-    clamped_depth_mm = min(float(socket_depth_mm), 1.8)
+    clamped_depth_mm = min(float(socket_depth_mm), 3.0)
     carve_sockets_at_positions(part1, sockets_3d, plane_no, r_socket, socket_depth_mm=clamped_depth_mm, sign=-1.0)
     carve_sockets_at_positions(part2, sockets_3d, plane_no, r_socket, socket_depth_mm=clamped_depth_mm, sign=1.0)
 
@@ -645,7 +776,7 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
     export_alignment_pins(
         output_3mf_path,
         output_obj_path,
-        num_pins=len(sockets_3d) * 2,
+        num_pins=len(sockets_3d),
         pin_radius_mm=pin_r_mm,
         pin_length_mm=pin_len_mm
     )
@@ -660,6 +791,9 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
 def main():
     args = parse_args()
     log(f"Starting conversion for: {args.input}")
+    if args.solidify_mm >= 0.0 and args.add_pegs:
+        log("Alignment pins/sockets disabled in Hollow Shell / Raw Mesh mode (only enabled in Full Solid mode).")
+        args.add_pegs = False
 
     t_start = time.time()
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -718,6 +852,7 @@ def main():
         img_grid = pixels.reshape((h, w, 4))
 
         color_attr = mesh.color_attributes.new(name='Color', type='BYTE_COLOR', domain='CORNER')
+        mesh.color_attributes.active_color = color_attr
         uvs = np.empty(num_loops * 2, dtype=np.float32)
         mesh.uv_layers.active.data.foreach_get('uv', uvs)
         uv_grid = uvs.reshape((num_loops, 2))
@@ -758,13 +893,64 @@ def main():
         stem, ext = os.path.splitext(f)
         return os.path.join(d, f"{stem}_{suffix}{ext}")
 
+    def make_solid_volume(target_obj, label):
+        bm = bmesh.new()
+        bm.from_mesh(target_obj.data)
+        bm.edges.ensure_lookup_table()
+        open_edges = [e for e in bm.edges if len(e.link_faces) == 1]
+        if not open_edges:
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+            bm.to_mesh(target_obj.data)
+            bm.free()
+            log(f"FULL SOLID: '{label}' is already watertight (0 boundary edges); slicer handles infill.")
+            return
+
+        log(f"FULL SOLID: Closing {len(open_edges)} open boundary edge(s) on '{label}' into a solid print volume...")
+        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-5)
+        open_edges = [e for e in bm.edges if len(e.link_faces) == 1]
+        existing_faces = set(bm.faces[:])
+        if open_edges:
+            try:
+                bmesh.ops.holes_fill(bm, edges=open_edges, sides=0)
+            except Exception as e:
+                log(f"Warning: holes_fill failed on '{label}': {e}")
+        new_faces = [f for f in bm.faces if f not in existing_faces]
+        if new_faces:
+            color_layer = bm.loops.layers.color.active
+            if color_layer:
+                seam_colors = []
+                for f in new_faces:
+                    for e in f.edges:
+                        for nf in e.link_faces:
+                            if nf in existing_faces:
+                                for l in nf.loops:
+                                    try:
+                                        seam_colors.append(l[color_layer])
+                                    except Exception:
+                                        pass
+                                break
+                if seam_colors:
+                    avg_c = tuple(np.mean(np.array([c[:4] for c in seam_colors]), axis=0))
+                    for f in new_faces:
+                        for l in f.loops:
+                            l[color_layer] = avg_c
+            bmesh.ops.triangulate(bm, faces=new_faces, quad_method='BEAUTY', ngon_method='BEAUTY')
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+        rem_open = sum(1 for e in bm.edges if len(e.link_faces) == 1)
+        bm.to_mesh(target_obj.data)
+        bm.free()
+        log(f"FULL SOLID: '{label}' boundary edges after cap = {rem_open}.")
+
     def apply_inward_solidify(target_obj, solidify_mm, label):
-        if solidify_mm <= 0.0:
+        if solidify_mm < 0.0:
+            make_solid_volume(target_obj, label)
+            return
+        if solidify_mm == 0.0:
             return
         max_dim = max(target_obj.dimensions)
         scale_fac = 0.001 if max_dim < 10.0 else 1.0
         thick_u = solidify_mm * scale_fac
-        log(f"SOLIDIFY: Adding {solidify_mm:.1f}mm wall thickness inward ({thick_u:.5f} units) to '{label}'...")
+        log(f"HOLLOW SHELL: Adding {solidify_mm:.1f}mm wall thickness inward ({thick_u:.5f} units) to '{label}'...")
         mod_sol = target_obj.modifiers.new(name='Solidify', type='SOLIDIFY')
         mod_sol.thickness = thick_u
         mod_sol.offset = -1.0
@@ -790,7 +976,7 @@ def main():
             not (parts_planes.get(pn) or parts_planes.get(pn.strip().replace(" ", "_")))
             for pn in parts_dict
         )
-        if args.solidify_mm > 0.0 and not has_lasso:
+        if args.solidify_mm != 0.0 and not has_lasso:
             apply_inward_solidify(obj, args.solidify_mm, "base mesh")
 
         total_sockets_carved = 0
@@ -808,17 +994,17 @@ def main():
             bpy.context.collection.objects.link(part_obj)
 
             if planes_for_part:
-                if args.solidify_mm > 0.0 and has_lasso:
+                if args.solidify_mm != 0.0 and has_lasso:
                     apply_inward_solidify(part_obj, args.solidify_mm, safe_name)
 
-                log(f"Part '{safe_name}': Applying {len(planes_for_part)} geometric planar cut(s) on solidified shell...")
+                log(f"Part '{safe_name}': Applying {len(planes_for_part)} geometric planar cut(s)...")
                 cut_planes_for_layout = []
                 for cp in planes_for_part:
                     p_co = (float(cp["point"][0]), float(cp["point"][1]), float(cp["point"][2]))
                     p_no = (float(cp["normal"][0]), float(cp["normal"][1]), float(cp["normal"][2]))
                     cut_planes_for_layout.append((p_co, p_no, 1.0))
                     bisect_mesh(part_obj, p_co, p_no, clear_outer=False, clear_inner=True, cap_cut=args.split_cap)
-                    if args.add_pegs and args.split_cap:
+                    if args.add_pegs and args.split_cap and args.solidify_mm < 0.0:
                         plane_key = (
                             round(p_co[0], 4), round(p_co[1], 4), round(p_co[2], 4),
                             round(abs(p_no[0]), 3), round(abs(p_no[1]), 3), round(abs(p_no[2]), 3)
@@ -826,10 +1012,10 @@ def main():
                         cached = plane_socket_cache.get(plane_key)
                         s_carved, r_eff = carve_part_sockets(
                             part_obj, p_co, p_no,
-                            socket_radius_mm=args.peg_radius if args.peg_radius > 0 else 1.15,
-                            socket_depth_mm=args.peg_height if args.peg_height > 0 else 1.8,
+                            socket_radius_mm=args.peg_radius if args.peg_radius > 0 else 2.0,
+                            socket_depth_mm=args.peg_height if args.peg_height > 0 else 3.0,
                             cached_sockets=cached,
-                            mate_obj=None if has_lasso else obj
+                            mate_obj=obj
                         )
                         if s_carved:
                             if plane_key not in plane_socket_cache:
@@ -923,10 +1109,10 @@ def main():
             bpy.data.meshes.remove(part_mesh_data, do_unlink=True)
             log(f"Part '{safe_name}' exported and memory freed.")
 
-        if args.add_pegs:
-            num_pins = max(2, total_sockets_carved // 2) if total_sockets_carved > 0 else len(parts_dict)
-            clamped_depth = min(float(args.peg_height if args.peg_height > 0 else 1.8), 1.8)
-            pin_r_mm = max(0.5, round(min(carved_radii_mm) - 0.15, 2)) if carved_radii_mm else 0.95
+        if args.add_pegs and total_sockets_carved > 0:
+            num_pins = max(2, total_sockets_carved // 2)
+            clamped_depth = min(float(args.peg_height if args.peg_height > 0 else 3.0), 3.0)
+            pin_r_mm = max(0.5, round(min(carved_radii_mm) - 0.15, 2)) if carved_radii_mm else 1.85
             pin_len_mm = max(1.0, round(clamped_depth * 2.0 - 0.6, 2))
             export_alignment_pins(
                 args.output_3mf, args.output_obj,
@@ -965,8 +1151,8 @@ def main():
             plane_no = plane_normals.get(axis, (1.0, 0.0, 0.0))
             plane_co = plane_coords.get(axis, (0.0, 0.0, 0.0))
 
-        # Solidify FIRST so bisect_mesh(use_fill=True) caps ONLY the 2.5mm cross-section
-        if args.solidify_mm > 0.0:
+        # Prepare volume before slicing (< 0 = Full Solid for slicer infill, > 0 = hollow shell)
+        if args.solidify_mm != 0.0:
             apply_inward_solidify(obj, args.solidify_mm, "base mesh")
 
         part1 = obj
@@ -980,13 +1166,13 @@ def main():
         bisect_mesh(part1, plane_co, plane_no, clear_outer=True, clear_inner=False, cap_cut=args.split_cap)
         bisect_mesh(part2, plane_co, plane_no, clear_outer=False, clear_inner=True, cap_cut=args.split_cap)
 
-        if args.add_pegs and args.split_cap:
+        if args.add_pegs and args.split_cap and args.solidify_mm < 0.0:
             add_alignment_sockets_and_dowel_pins(
                 part1, part2, plane_co, plane_no,
                 output_3mf_path=args.output_3mf,
                 output_obj_path=args.output_obj,
-                socket_radius_mm=args.peg_radius if args.peg_radius > 0 else 1.15,
-                socket_depth_mm=args.peg_height if args.peg_height > 0 else 1.8,
+                socket_radius_mm=args.peg_radius if args.peg_radius > 0 else 2.0,
+                socket_depth_mm=args.peg_height if args.peg_height > 0 else 3.0,
                 num_pins=2
             )
 
@@ -1032,17 +1218,8 @@ def main():
             bpy.ops.object.modifier_apply(modifier='Decimate')
             log(f"Decimation done in {time.time()-t_dec:.2f}s. New verts: {len(mesh.vertices)}, faces: {len(mesh.polygons)}")
 
-        if args.solidify_mm > 0.0:
-            max_dim = max(obj.dimensions)
-            scale_fac = 0.001 if max_dim < 10.0 else 1.0
-            thick_u = args.solidify_mm * scale_fac
-            log(f"SOLIDIFY: Adding {args.solidify_mm:.1f}mm wall thickness inward ({thick_u:.5f} units)...")
-            mod_sol = obj.modifiers.new(name='Solidify', type='SOLIDIFY')
-            mod_sol.thickness = thick_u
-            mod_sol.offset = -1.0
-            mod_sol.use_rim = True
-            bpy.context.view_layer.objects.active = obj
-            bpy.ops.object.modifier_apply(modifier='Solidify')
+        if args.solidify_mm != 0.0:
+            apply_inward_solidify(obj, args.solidify_mm, "base mesh")
 
         export_object(obj, args.output_obj, args.output_3mf, ground_z=args.ground_z)
 

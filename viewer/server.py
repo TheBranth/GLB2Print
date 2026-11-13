@@ -377,8 +377,10 @@ class UnifiedAppServer:
                         plane_no_str = ",".join(str(float(x)) for x in plane_normal) if (plane_normal and len(plane_normal) == 3) else None
                         add_pegs = bool(data.get("add_pegs", False))
                         peg_radius = float(data.get("peg_radius", 2.0))
-                        peg_height = float(data.get("peg_height", 5.0))
-                        solidify_mm = float(data.get("solidify_mm", 0.0))
+                        peg_height = float(data.get("peg_height", 3.0))
+                        solidify_mm = float(data.get("solidify_mm", -1.0))
+                        if solidify_mm >= 0.0:
+                            add_pegs = False
 
                         if parts_data:
                             with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tf:

@@ -106,7 +106,7 @@ class ConversionJob:
         if not self.split_cap:
             cmd.append("--no-split-cap")
 
-        if self.solidify_mm > 0.0:
+        if self.solidify_mm != 0.0:
             cmd.append(f"--solidify-mm={self.solidify_mm}")
 
         if self.plane_point and self.plane_normal:

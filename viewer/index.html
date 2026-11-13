@@ -477,20 +477,20 @@
           </div>
         </div>
 
-        <!-- 3. SHELL WALL THICKNESS (SOLIDIFY) -->
+        <!-- 3. PRINT VOLUME / SHELL WALL MODE -->
         <div class="card">
           <div class="card-title">
-            <span>Shell Wall Thickness (Solidify)</span>
-            <span style="font-size: 0.68rem; color: #38bdf8; font-weight: 600;">Fixes Slicer ⚠️</span>
+            <span>Print Volume Mode</span>
+            <span style="font-size: 0.68rem; color: #38bdf8; font-weight: 600;">Slicer Ready</span>
           </div>
           <div style="font-size: 0.72rem; color: #94a3b8; margin-bottom: 7px; line-height: 1.35;">
-            Extrudes inward walls to turn open shells (masks, visors, sculptures) into watertight, rigid 3D solids.
+            <strong>Full Solid</strong> closes meshes so your slicer generates infill &amp; enables alignment pins. <strong>Hollow Shell</strong> extrudes thin walls for hand-gluing (pins disabled).
           </div>
           <div class="pill-group" id="solidify-pills">
-            <div class="pill-btn active" onclick="setSolidify(2.5, this)">2.5mm (Solid)</div>
-            <div class="pill-btn" onclick="setSolidify(3.0, this)">3.0mm</div>
-            <div class="pill-btn" onclick="setSolidify(2.0, this)">2.0mm</div>
-            <div class="pill-btn" onclick="setSolidify(0.0, this)">Off (Raw Shell)</div>
+            <div class="pill-btn active" onclick="setSolidify(-1, this)">Full Solid (Slicer Infill)</div>
+            <div class="pill-btn" onclick="setSolidify(2.5, this)">2.5mm Shell</div>
+            <div class="pill-btn" onclick="setSolidify(3.0, this)">3.0mm Shell</div>
+            <div class="pill-btn" onclick="setSolidify(0.0, this)">Off (Raw Mesh)</div>
           </div>
         </div>
 
@@ -571,14 +571,17 @@
               </div>
             </div>
 
-            <!-- Sockets & Dowel Pins Option -->
-            <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
-              <label class="check-row" title="Carves recessed female sockets on flat cut surfaces and exports alignment_pins.obj. Keeps parts 100% flat on print bed with anti-puncture wall margin.">
+            <!-- Sockets & Dowel Pins Option (Full Solid mode only) -->
+            <div id="pegs-option-container" style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
+              <label class="check-row" title="Carves recessed female sockets inside solid cut faces (9-ray containment & >= 2mm wall margin) and exports alignment_pins.obj.">
                 <input type="checkbox" id="chk-add-pegs" checked> 🧩 Alignment Sockets + Printable Pins (Flat-Bed)
               </label>
               <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px; line-height: 1.3;">
-                Both parts stay flat on the bed with recessed sockets (anti-swiss-cheese guard &ge; 2mm margin). Generates companion <code>alignment_pins.obj</code>.
+                Checks negative cylinders against the outer shell (&ge; 2mm wall margin). Generates companion <code>alignment_pins.obj</code>.
               </div>
+            </div>
+            <div id="pegs-shell-note" style="display: none; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.69rem; color: #94a3b8; line-height: 1.3;">
+              Hollow / raw shell mode: alignment pins disabled (glue cut seams by hand; select <strong>Full Solid</strong> to enable pins).
             </div>
           </div>
 
@@ -758,7 +761,7 @@
     let currentPlaneAxis = 'X';
     let currentPlaneCoord = 0.0;
     let currentTexRes = 0; // 0 = Original 4K (crisp, zero downsampling noise)
-    let currentSolidifyMm = 2.5; // 2.5mm default inward wall thickness for open shells
+    let currentSolidifyMm = -1; // -1 = Full Solid (Slicer Infill); > 0 = hollow shell thickness in mm; 0 = raw mesh
     let currentDecimateCount = 250000;
     let isDecimateEnabled = true;
 
@@ -1797,6 +1800,17 @@
       for (let p of pills) p.classList.remove('active');
       if (el) el.classList.add('active');
       else if (typeof event !== 'undefined' && event && event.target) event.target.classList.add('active');
+
+      const isFullSolid = val < 0;
+      const pegsWrap = document.getElementById('pegs-option-container');
+      const pegsChk = document.getElementById('chk-add-pegs');
+      const pegsNote = document.getElementById('pegs-shell-note');
+      if (pegsWrap) pegsWrap.style.display = isFullSolid ? 'block' : 'none';
+      if (pegsNote) pegsNote.style.display = isFullSolid ? 'none' : 'block';
+      if (pegsChk) {
+        pegsChk.disabled = !isFullSolid;
+        pegsChk.checked = isFullSolid;
+      }
     }
 
     function toggleDecimate(enabled) {
@@ -1942,7 +1956,7 @@
         split_mode: currentSplitMode
       };
 
-      const addPegs = document.getElementById('chk-add-pegs') ? document.getElementById('chk-add-pegs').checked : false;
+      const addPegs = (currentSolidifyMm < 0) && (document.getElementById('chk-add-pegs') ? document.getElementById('chk-add-pegs').checked : false);
       payload.add_pegs = addPegs;
 
       if (stagedParts.length > 0) {
