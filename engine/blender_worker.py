@@ -493,7 +493,9 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=2.0
     """
     Finds safe socket positions inside a solid planar cut cross-section using a KDTree on
     cut-face boundary edges plus a 9-ray outer-shell containment check so cylindrical sockets
-    maintain >= 2.0mm radial wall clearance and >= 1.5mm behind-socket solid backing.
+    scale cleanly to the model / cross-section size while maintaining >= 2.0mm radial wall
+    clearance and >= 1.5mm behind-socket solid backing.
+    Returns `(chosen_pts, r_eff, depth_eff_mm)`.
     """
     import mathutils
     plane_co = mathutils.Vector(plane_co)
@@ -502,12 +504,15 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=2.0
 
     max_dim = max(part_obj.dimensions)
     scale_fac = 0.001 if max_dim < 10.0 else 1.0
-    r_max = min(max(socket_radius_mm, 1.2), 2.5) * scale_fac
+    model_span_mm = max_dim / scale_fac
+    if float(socket_radius_mm) <= 2.5:
+        r_target_mm = max(2.0, min(12.0, model_span_mm * 0.015))
+    else:
+        r_target_mm = float(socket_radius_mm)
+    r_max = r_target_mm * scale_fac
     r_min = 1.2 * scale_fac
     wall_margin = 2.0 * scale_fac  # Strict >= 2.0mm solid perimeter margin around socket
     min_half_width = r_min + wall_margin
-    clamped_depth = min(float(socket_depth_mm), 3.0)
-    min_solid_depth = (clamped_depth + 1.5) * scale_fac  # Require >= 1.5mm solid backing
 
     bm = bmesh.new()
     bm.from_mesh(part_obj.data)
@@ -521,7 +526,7 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=2.0
     ]
     if not plane_faces:
         bm.free()
-        return [], 0.0
+        return [], 0.0, 0.0
 
     plane_face_set = set(plane_faces)
     boundary_pts = []
@@ -538,7 +543,7 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=2.0
 
     if len(boundary_pts) < 3:
         bm.free()
-        return [], 0.0
+        return [], 0.0, 0.0
 
     kd = mathutils.kdtree.KDTree(len(boundary_pts))
     for i, pt in enumerate(boundary_pts):
@@ -580,39 +585,53 @@ def find_rim_socket_positions(part_obj, plane_co, plane_no, socket_radius_mm=2.0
 
     if not candidates:
         log(f"WARNING: No solid region >= {min_half_width/scale_fac:.1f}mm half-width on '{part_obj.name}'; skipping sockets.")
-        return [], 0.0
+        return [], 0.0, 0.0
 
     candidates.sort(key=lambda x: x[0], reverse=True)
     min_sep = max(12.0 * scale_fac, max_span * 0.30)
     chosen = []
-    chosen_dists = []
+    chosen_radii = []
+    chosen_depths_mm = []
+    chosen_margins = []
 
     for sep_target in (min_sep, 12.0 * scale_fac):
         for dist, pt in candidates:
             if len(chosen) >= num_pins:
                 break
             if all((pt - prev).length >= sep_target for prev in chosen):
-                r_cand = min(r_max, dist - wall_margin)
+                r_cand = min(r_max, dist - wall_margin, dist * 0.42)
                 if r_cand < r_min:
                     continue
-                if not _has_solid_depth(part_obj, pt, ray_dir, r_cand, min_solid_depth, scale_fac, t1, t2):
-                    continue
-                if mate_obj is not None and not _has_solid_depth(mate_obj, pt, -ray_dir, r_cand, min_solid_depth, scale_fac, t1, t2):
+                r_cand_mm = r_cand / scale_fac
+                d_desired = min(15.0, max(float(socket_depth_mm), r_cand_mm * 1.4))
+                safe_d = None
+                for d_try in sorted({round(d_desired, 2), round(d_desired * 0.65, 2), 3.0}, reverse=True):
+                    min_solid_depth = (d_try + 1.5) * scale_fac
+                    r_guard = r_cand + 1.5 * scale_fac
+                    if not _has_solid_depth(part_obj, pt, ray_dir, r_guard, min_solid_depth, scale_fac, t1, t2):
+                        continue
+                    if mate_obj is not None and not _has_solid_depth(mate_obj, pt, -ray_dir, r_guard, min_solid_depth, scale_fac, t1, t2):
+                        continue
+                    safe_d = d_try
+                    break
+                if safe_d is None:
                     continue
                 chosen.append(pt)
-                chosen_dists.append(dist)
+                chosen_radii.append(r_cand)
+                chosen_depths_mm.append(safe_d)
+                chosen_margins.append(dist)
         if len(chosen) >= num_pins:
             break
 
     if not chosen:
-        log(f"WARNING: No region passed 9-ray >= {min_solid_depth/scale_fac:.1f}mm outer-shell guard on '{part_obj.name}'; skipping sockets.")
-        return [], 0.0
+        log(f"WARNING: No region passed 9-ray outer-shell guard on '{part_obj.name}'; skipping sockets.")
+        return [], 0.0, 0.0
 
-    min_chosen_dist = min(chosen_dists)
-    r_eff = min(r_max, min_chosen_dist - wall_margin)
-    for idx, (pt, d) in enumerate(zip(chosen, chosen_dists)):
-        log(f"Safe solid socket #{idx+1} on '{part_obj.name}': margin={(d-r_eff)/scale_fac:.2f}mm, r={r_eff/scale_fac:.2f}mm.")
-    return chosen, r_eff
+    r_eff = min(chosen_radii)
+    depth_eff_mm = min(chosen_depths_mm)
+    for idx, (pt, d) in enumerate(zip(chosen, chosen_margins)):
+        log(f"Safe solid socket #{idx+1} on '{part_obj.name}': margin={(d-r_eff)/scale_fac:.2f}mm, r={r_eff/scale_fac:.2f}mm, depth={depth_eff_mm:.2f}mm.")
+    return chosen, r_eff, depth_eff_mm
 
 
 def carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_depth_mm=3.0, sign=1.0):
@@ -628,7 +647,7 @@ def carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_
     max_dim = max(part_obj.dimensions)
     scale_fac = 0.001 if max_dim < 10.0 else 1.0
 
-    clamped_depth_mm = min(float(socket_depth_mm), 3.0)
+    clamped_depth_mm = min(float(socket_depth_mm), 15.0)
     d_socket = clamped_depth_mm * scale_fac
     air_overlap = 0.2 * scale_fac
 
@@ -638,7 +657,7 @@ def carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_
     for idx, s_pos in enumerate(sockets_3d):
         loc = mathutils.Vector(s_pos) + plane_no * (sign * (d_socket / 2.0 - air_overlap))
         bpy.ops.mesh.primitive_cylinder_add(
-            vertices=24,
+            vertices=32,
             radius=r_socket,
             depth=d_socket + 2.0 * air_overlap,
             location=loc,
@@ -668,13 +687,13 @@ def carve_part_sockets(part_obj, plane_co, plane_no, socket_radius_mm=2.0, socke
                        num_pins=2, cached_sockets=None, mate_obj=None):
     """
     Carves recessed female cylindrical sockets into the solid cut face of a part.
-    If `cached_sockets`=(sockets_3d, r_socket) is provided from a mating half, reuses the exact
-    3D coordinates and radius so pins align across the seam.
+    If `cached_sockets`=(sockets_3d, r_socket, depth_mm) is provided from a mating half,
+    reuses the exact 3D coordinates, radius, and depth so pins align across the seam.
     """
     if cached_sockets and cached_sockets[0]:
-        sockets_3d, r_socket = cached_sockets
+        sockets_3d, r_socket, depth_mm = cached_sockets
     else:
-        sockets_3d, r_socket = find_rim_socket_positions(
+        sockets_3d, r_socket, depth_mm = find_rim_socket_positions(
             part_obj, plane_co, plane_no,
             socket_radius_mm=socket_radius_mm,
             socket_depth_mm=socket_depth_mm,
@@ -683,9 +702,9 @@ def carve_part_sockets(part_obj, plane_co, plane_no, socket_radius_mm=2.0, socke
             mate_obj=mate_obj
         )
     if not sockets_3d:
-        return [], 0.0
-    carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_depth_mm=socket_depth_mm, sign=1.0)
-    return sockets_3d, r_socket
+        return [], 0.0, 0.0
+    carve_sockets_at_positions(part_obj, sockets_3d, plane_no, r_socket, socket_depth_mm=depth_mm, sign=1.0)
+    return sockets_3d, r_socket, depth_mm
 
 
 def export_alignment_pins(output_3mf_path, output_obj_path, num_pins=4, pin_radius_mm=0.95, pin_length_mm=3.0):
@@ -753,7 +772,7 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
     max_dim = max(max(part1.dimensions), max(part2.dimensions))
     scale_fac = 0.001 if max_dim < 10.0 else 1.0
 
-    sockets_3d, r_socket = find_rim_socket_positions(
+    sockets_3d, r_socket, clamped_depth_mm = find_rim_socket_positions(
         part1, plane_co, plane_no,
         socket_radius_mm=socket_radius_mm,
         socket_depth_mm=socket_depth_mm,
@@ -765,7 +784,6 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
         log("No safe solid regions passed >= 2mm outer-shell guard; skipping socket carving.")
         return
 
-    clamped_depth_mm = min(float(socket_depth_mm), 3.0)
     carve_sockets_at_positions(part1, sockets_3d, plane_no, r_socket, socket_depth_mm=clamped_depth_mm, sign=-1.0)
     carve_sockets_at_positions(part2, sockets_3d, plane_no, r_socket, socket_depth_mm=clamped_depth_mm, sign=1.0)
 
@@ -958,6 +976,28 @@ def main():
         bpy.context.view_layer.objects.active = target_obj
         bpy.ops.object.modifier_apply(modifier='Solidify')
 
+    def _pre_decimate_and_prepare(target_obj, label, prepare_volume=True):
+        """Closes GLTF seams before decimation in Full Solid mode, or decimates before Solidify in Hollow mode."""
+        if prepare_volume and args.solidify_mm < 0.0:
+            apply_inward_solidify(target_obj, args.solidify_mm, label)
+
+        did_decimate = False
+        if args.decimate_ratio < 0.999 or (args.target_triangles > 0 and len(target_obj.data.polygons) > args.target_triangles):
+            ratio = args.decimate_ratio
+            if args.target_triangles > 0 and len(target_obj.data.polygons) > args.target_triangles:
+                ratio = args.target_triangles / float(len(target_obj.data.polygons))
+            log(f"Pre-decimating {label} from {len(target_obj.data.polygons)} to target ratio {ratio:.3f} (keeps cut holes sharp)...")
+            mod = target_obj.modifiers.new(name='Decimate', type='DECIMATE')
+            mod.ratio = float(ratio)
+            mod.use_collapse_triangulate = True
+            bpy.context.view_layer.objects.active = target_obj
+            bpy.ops.object.modifier_apply(modifier='Decimate')
+            did_decimate = True
+
+        if prepare_volume and args.solidify_mm > 0.0:
+            apply_inward_solidify(target_obj, args.solidify_mm, label)
+        return did_decimate
+
     # 6. Check if Multi-Part Lasso / Region Split is requested
     if args.parts_json and os.path.isfile(args.parts_json):
         log(f"MULTI-PART SPLIT: Processing parts from {args.parts_json}...")
@@ -976,12 +1016,14 @@ def main():
             not (parts_planes.get(pn) or parts_planes.get(pn.strip().replace(" ", "_")))
             for pn in parts_dict
         )
-        if args.solidify_mm != 0.0 and not has_lasso:
-            apply_inward_solidify(obj, args.solidify_mm, "base mesh")
+        pre_decimated = False
+        if not has_lasso:
+            pre_decimated = _pre_decimate_and_prepare(obj, "base mesh", prepare_volume=(args.solidify_mm != 0.0))
 
         total_sockets_carved = 0
         plane_socket_cache = {}
         carved_radii_mm = []
+        carved_depths_mm = []
 
         for part_name, face_indices in parts_dict.items():
             safe_name = part_name.strip().replace(" ", "_")
@@ -1010,7 +1052,7 @@ def main():
                             round(abs(p_no[0]), 3), round(abs(p_no[1]), 3), round(abs(p_no[2]), 3)
                         )
                         cached = plane_socket_cache.get(plane_key)
-                        s_carved, r_eff = carve_part_sockets(
+                        s_carved, r_eff, d_eff_mm = carve_part_sockets(
                             part_obj, p_co, p_no,
                             socket_radius_mm=args.peg_radius if args.peg_radius > 0 else 2.0,
                             socket_depth_mm=args.peg_height if args.peg_height > 0 else 3.0,
@@ -1019,9 +1061,10 @@ def main():
                         )
                         if s_carved:
                             if plane_key not in plane_socket_cache:
-                                plane_socket_cache[plane_key] = (s_carved, r_eff)
+                                plane_socket_cache[plane_key] = (s_carved, r_eff, d_eff_mm)
                             scale_fac = 0.001 if max(part_obj.dimensions) < 10.0 else 1.0
                             carved_radii_mm.append(r_eff / scale_fac)
+                            carved_depths_mm.append(d_eff_mm)
                         total_sockets_carved += len(s_carved)
             else:
                 keep_set = set()
@@ -1084,8 +1127,8 @@ def main():
                 if args.solidify_mm > 0.0:
                     apply_inward_solidify(part_obj, args.solidify_mm, safe_name)
 
-            # Optional decimation on the extracted part
-            if args.decimate_ratio < 0.999 or (args.target_triangles > 0 and len(part_obj.data.polygons) > args.target_triangles):
+            # Optional decimation on the extracted part (skipped if pre-decimated before cutting)
+            if not pre_decimated and (args.decimate_ratio < 0.999 or (args.target_triangles > 0 and len(part_obj.data.polygons) > args.target_triangles)):
                 ratio = args.decimate_ratio
                 if args.target_triangles > 0 and len(part_obj.data.polygons) > args.target_triangles:
                     ratio = args.target_triangles / float(len(part_obj.data.polygons))
@@ -1111,7 +1154,7 @@ def main():
 
         if args.add_pegs and total_sockets_carved > 0:
             num_pins = max(2, total_sockets_carved // 2)
-            clamped_depth = min(float(args.peg_height if args.peg_height > 0 else 3.0), 3.0)
+            clamped_depth = min(carved_depths_mm) if carved_depths_mm else 3.0
             pin_r_mm = max(0.5, round(min(carved_radii_mm) - 0.15, 2)) if carved_radii_mm else 1.85
             pin_len_mm = max(1.0, round(clamped_depth * 2.0 - 0.6, 2))
             export_alignment_pins(
@@ -1151,9 +1194,7 @@ def main():
             plane_no = plane_normals.get(axis, (1.0, 0.0, 0.0))
             plane_co = plane_coords.get(axis, (0.0, 0.0, 0.0))
 
-        # Prepare volume before slicing (< 0 = Full Solid for slicer infill, > 0 = hollow shell)
-        if args.solidify_mm != 0.0:
-            apply_inward_solidify(obj, args.solidify_mm, "base mesh")
+        _pre_decimate_and_prepare(obj, "base mesh", prepare_volume=(args.solidify_mm != 0.0))
 
         part1 = obj
         part1.name = "Part_1"
@@ -1175,19 +1216,6 @@ def main():
                 socket_depth_mm=args.peg_height if args.peg_height > 0 else 3.0,
                 num_pins=2
             )
-
-        # Optional decimation on split parts
-        for p, p_name in ((part1, "Part 1"), (part2, "Part 2")):
-            if args.decimate_ratio < 0.999 or (args.target_triangles > 0 and len(p.data.polygons) > args.target_triangles):
-                ratio = args.decimate_ratio
-                if args.target_triangles > 0 and len(p.data.polygons) > args.target_triangles:
-                    ratio = args.target_triangles / float(len(p.data.polygons))
-                log(f"Decimating {p_name} from {len(p.data.polygons)} to target ratio {ratio:.3f}...")
-                mod = p.modifiers.new(name='Decimate', type='DECIMATE')
-                mod.ratio = float(ratio)
-                mod.use_collapse_triangulate = True
-                bpy.context.view_layer.objects.active = p
-                bpy.ops.object.modifier_apply(modifier='Decimate')
 
         p1_obj = split_path(args.output_obj, "part1")
         p2_obj = split_path(args.output_obj, "part2")
