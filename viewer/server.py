@@ -378,6 +378,7 @@ class UnifiedAppServer:
                         add_pegs = bool(data.get("add_pegs", False))
                         peg_radius = float(data.get("peg_radius", 2.0))
                         peg_height = float(data.get("peg_height", 3.0))
+                        height_mm = float(data.get("height_mm", 0.0))
                         solidify_mm = float(data.get("solidify_mm", -1.0))
                         if solidify_mm >= 0.0:
                             add_pegs = False
@@ -398,6 +399,7 @@ class UnifiedAppServer:
                             texture_res=int(data.get("texture_res", 0)),
                             target_triangles=int(data.get("target_triangles", 250000)),
                             ground_z=bool(data.get("ground_z", True)),
+                            height_mm=height_mm,
                             split_axis=split_axis if split_mode == "planar" else "none",
                             split_coord=split_coord,
                             split_cap=cap_cut,

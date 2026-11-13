@@ -893,11 +893,13 @@ def main():
     min_bounds = np.min(verts_mat, axis=0)
     max_bounds = np.max(verts_mat, axis=0)
     cur_height = max_bounds[2] - min_bounds[2]
+    coord_scale_factor = 1.0
 
     if args.height_mm > 0.0 and cur_height > 1e-4:
-        scale_factor = args.height_mm / cur_height
-        log(f"Scaling model height from {cur_height:.2f}mm to {args.height_mm:.2f}mm...")
-        obj.scale = (scale_factor, scale_factor, scale_factor)
+        coord_scale_factor = args.height_mm / cur_height
+        cur_height_mm = cur_height * (1000.0 if max(obj.dimensions) < 10.0 else 1.0)
+        log(f"Scaling model height from {cur_height_mm:.1f}mm ({cur_height:.4f}u) to {args.height_mm:.1f}mm (factor={coord_scale_factor:.4f})...")
+        obj.scale = (coord_scale_factor, coord_scale_factor, coord_scale_factor)
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
         mesh = obj.data
         mesh.vertices.foreach_get('co', verts_co)
@@ -924,7 +926,8 @@ def main():
             return
 
         log(f"FULL SOLID: Closing {len(open_edges)} open boundary edge(s) on '{label}' into a solid print volume...")
-        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-5)
+        weld_dist = 1e-4 if max(target_obj.dimensions) >= 10.0 else 1e-5
+        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=weld_dist)
         open_edges = [e for e in bm.edges if len(e.link_faces) == 1]
         existing_faces = set(bm.faces[:])
         if open_edges:
@@ -1042,7 +1045,11 @@ def main():
                 log(f"Part '{safe_name}': Applying {len(planes_for_part)} geometric planar cut(s)...")
                 cut_planes_for_layout = []
                 for cp in planes_for_part:
-                    p_co = (float(cp["point"][0]), float(cp["point"][1]), float(cp["point"][2]))
+                    p_co = (
+                        float(cp["point"][0]) * coord_scale_factor,
+                        float(cp["point"][1]) * coord_scale_factor,
+                        float(cp["point"][2]) * coord_scale_factor,
+                    )
                     p_no = (float(cp["normal"][0]), float(cp["normal"][1]), float(cp["normal"][2]))
                     cut_planes_for_layout.append((p_co, p_no, 1.0))
                     bisect_mesh(part_obj, p_co, p_no, clear_outer=False, clear_inner=True, cap_cut=args.split_cap)
@@ -1166,7 +1173,7 @@ def main():
     elif (args.plane_point and args.plane_normal) or (args.split_axis != "none"):
         if args.plane_point and args.plane_normal:
             try:
-                co_vals = [float(x.strip()) for x in args.plane_point.split(",")]
+                co_vals = [float(x.strip()) * coord_scale_factor for x in args.plane_point.split(",")]
                 no_vals = [float(x.strip()) for x in args.plane_normal.split(",")]
                 plane_co = (co_vals[0], co_vals[1], co_vals[2])
                 plane_no = (no_vals[0], no_vals[1], no_vals[2])
@@ -1177,7 +1184,7 @@ def main():
                 plane_co = (0.0, 0.0, 0.0)
         else:
             axis = args.split_axis.lower()
-            coord = args.split_coord
+            coord = args.split_coord * coord_scale_factor
             log(f"PLANAR CUT: Splitting model along {axis.upper()} axis at coordinate {coord:.3f} (Cap: {args.split_cap}, Pegs: {args.add_pegs})...")
 
             plane_normals = {

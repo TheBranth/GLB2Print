@@ -119,6 +119,35 @@
       box-shadow: 0 0 10px rgba(37, 99, 235, 0.4);
     }
 
+    .dim-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .dim-field {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .dim-field label {
+      font-size: 0.66rem;
+      color: #9ca3af;
+      font-weight: 600;
+    }
+    .dim-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 5px;
+      color: #f3f4f6;
+      padding: 4px 6px;
+      font-size: 0.74rem;
+      font-family: monospace;
+      outline: none;
+    }
+    .dim-input:focus { border-color: #38bdf8; }
+
     /* Sliders */
     .slider-header { display: flex; justify-content: space-between; font-size: 0.74rem; margin-bottom: 5px; }
     .slider-val { font-weight: 700; color: #38bdf8; font-family: monospace; }
@@ -466,7 +495,47 @@
           </div>
         </div>
 
-        <!-- 2. TEXTURE RESOLUTION -->
+        <!-- 2. TARGET PRINT SIZE (MM) -->
+        <div class="card" id="card-print-scale">
+          <div class="card-title">
+            <span>Target Print Size (mm)</span>
+            <span id="scale-bed-warn" style="display: none; font-size: 0.66rem; color: #fbbf24; font-weight: 700;">&gt;250mm Bed</span>
+          </div>
+          <div style="font-size: 0.71rem; color: #94a3b8; margin-bottom: 7px; line-height: 1.35;">
+            Scales model &amp; cut planes <strong>before</strong> carving sockets &amp; pins so everything fits your bed 1:1 in Orca.
+          </div>
+          <div class="pill-group" id="scale-pills">
+            <div class="pill-btn active" id="btn-scale-100" onclick="setScalePreset('native', this)">100%</div>
+            <div class="pill-btn" id="btn-scale-150" onclick="setScalePreset(150, this)">Fit 150mm</div>
+            <div class="pill-btn" id="btn-scale-200" onclick="setScalePreset(200, this)">Fit 200mm</div>
+            <div class="pill-btn" id="btn-scale-250" onclick="setScalePreset(250, this)">Fit 250mm</div>
+          </div>
+          <div class="dim-grid">
+            <div class="dim-field">
+              <label for="scale-dim-x">W (X) mm</label>
+              <input class="dim-input" id="scale-dim-x" type="number" step="0.5" min="1" placeholder="-" oninput="onScaleInput('x', this.value)">
+            </div>
+            <div class="dim-field">
+              <label for="scale-dim-y">D (Y) mm</label>
+              <input class="dim-input" id="scale-dim-y" type="number" step="0.5" min="1" placeholder="-" oninput="onScaleInput('y', this.value)">
+            </div>
+            <div class="dim-field">
+              <label for="scale-dim-z">H (Z) mm</label>
+              <input class="dim-input" id="scale-dim-z" type="number" step="0.5" min="1" placeholder="-" oninput="onScaleInput('z', this.value)">
+            </div>
+            <div class="dim-field">
+              <label for="scale-pct">Scale %</label>
+              <input class="dim-input" id="scale-pct" type="number" step="1" min="1" value="100" oninput="onScaleInput('pct', this.value)">
+            </div>
+          </div>
+          <div style="margin-top: 7px;">
+            <label class="check-row" style="font-size: 0.72rem; margin-bottom: 0;" title="Exports OBJ coordinates directly in millimeters (1 unit = 1 mm) so OrcaSlicer matches alignment_pins.obj without rescaling.">
+              <input type="checkbox" id="chk-export-mm" checked> Export 1:1 mm for Orca (matches pins)
+            </label>
+          </div>
+        </div>
+
+        <!-- 3. TEXTURE RESOLUTION -->
         <div class="card">
           <div class="card-title">Pre-Bake Texture Res</div>
           <div class="pill-group" id="tex-res-pills">
@@ -764,6 +833,8 @@
     let currentSolidifyMm = -1; // -1 = Full Solid (Slicer Infill); > 0 = hollow shell thickness in mm; 0 = raw mesh
     let currentDecimateCount = 250000;
     let isDecimateEnabled = true;
+    let nativeDimsMm = null; // { x: BlenderX, y: BlenderY (depth), z: BlenderZ (height) }
+    let currentScaleRatio = 1.0;
 
     // Planar Cut & 2-Click Knife State
     let planarSubMode = 'knife'; // 'knife' or 'axis'
@@ -952,9 +1023,19 @@
         // Precompute spatial raycasting arrays
         precomputeMeshData(primaryMesh);
 
+        const nativeToMm = (Math.max(size.x, size.y, size.z) < 10.0) ? 1000.0 : 1.0;
+        // Three.js Y-up -> Blender Z-up: X_B = size.x, Y_B = size.z (depth), Z_B = size.y (height)
+        nativeDimsMm = {
+          x: size.x * nativeToMm,
+          y: size.z * nativeToMm,
+          z: size.y * nativeToMm
+        };
+        currentScaleRatio = 1.0;
+        updateScaleInputsUI(true);
+
         document.getElementById('card-model-name').innerText = "Model Ready";
-        document.getElementById('model-bounds-dim').innerText = 
-          `${(size.x * 1000).toFixed(1)} × ${(size.y * 1000).toFixed(1)} × ${(size.z * 1000).toFixed(1)} mm`;
+        document.getElementById('model-bounds-dim').innerText =
+          `${nativeDimsMm.x.toFixed(1)} × ${nativeDimsMm.y.toFixed(1)} × ${nativeDimsMm.z.toFixed(1)} mm`;
         document.getElementById('model-poly-count').innerText = 
           `${totalFaces.toLocaleString()} faces (${primaryMesh.geometry.attributes.position.count.toLocaleString()} verts)`;
 
@@ -1794,6 +1875,56 @@
       else if (typeof event !== 'undefined' && event && event.target) event.target.classList.add('active');
     }
 
+    function syncScalePills(activeMaxMm, isNative) {
+      const pills = document.getElementById('scale-pills');
+      if (!pills) return;
+      document.getElementById('btn-scale-100').classList.toggle('active', !!isNative);
+      document.getElementById('btn-scale-150').classList.toggle('active', !isNative && Math.abs(activeMaxMm - 150) < 0.2);
+      document.getElementById('btn-scale-200').classList.toggle('active', !isNative && Math.abs(activeMaxMm - 200) < 0.2);
+      document.getElementById('btn-scale-250').classList.toggle('active', !isNative && Math.abs(activeMaxMm - 250) < 0.2);
+    }
+
+    function updateScaleInputsUI(resetNative = false, skipField = null) {
+      if (!nativeDimsMm) return;
+      const sx = nativeDimsMm.x * currentScaleRatio;
+      const sy = nativeDimsMm.y * currentScaleRatio;
+      const sz = nativeDimsMm.z * currentScaleRatio;
+      if (skipField !== 'x') document.getElementById('scale-dim-x').value = sx.toFixed(1);
+      if (skipField !== 'y') document.getElementById('scale-dim-y').value = sy.toFixed(1);
+      if (skipField !== 'z') document.getElementById('scale-dim-z').value = sz.toFixed(1);
+      if (skipField !== 'pct') document.getElementById('scale-pct').value = (currentScaleRatio * 100).toFixed(0);
+      const maxScaled = Math.max(sx, sy, sz);
+      const warnEl = document.getElementById('scale-bed-warn');
+      if (warnEl) warnEl.style.display = maxScaled > 250.5 ? 'inline' : 'none';
+      syncScalePills(maxScaled, resetNative || Math.abs(currentScaleRatio - 1.0) < 1e-4);
+    }
+
+    function setScalePreset(val, el) {
+      if (!nativeDimsMm) return;
+      if (val === 'native') {
+        currentScaleRatio = 1.0;
+        updateScaleInputsUI(true);
+      } else {
+        const nativeMax = Math.max(nativeDimsMm.x, nativeDimsMm.y, nativeDimsMm.z);
+        if (nativeMax > 1e-4) {
+          currentScaleRatio = parseFloat(val) / nativeMax;
+          updateScaleInputsUI(false);
+        }
+      }
+    }
+
+    function onScaleInput(field, rawVal) {
+      if (!nativeDimsMm) return;
+      const v = parseFloat(rawVal);
+      if (!isFinite(v) || v <= 0) return;
+      if (field === 'pct') {
+        currentScaleRatio = v / 100.0;
+      } else if (nativeDimsMm[field] > 1e-4) {
+        currentScaleRatio = v / nativeDimsMm[field];
+      }
+      updateScaleInputsUI(false, field);
+    }
+
     function setSolidify(val, el) {
       currentSolidifyMm = val;
       const pills = document.getElementById('solidify-pills').children;
@@ -1945,11 +2076,17 @@
 
       const capHoles = document.getElementById('chk-cap-holes').checked;
       const groundZ = document.getElementById('chk-ground-z').checked;
+      const exportMm = document.getElementById('chk-export-mm') ? document.getElementById('chk-export-mm').checked : true;
+      let targetHeightMm = 0.0;
+      if (nativeDimsMm && nativeDimsMm.z > 1e-4 && (exportMm || Math.abs(currentScaleRatio - 1.0) > 1e-4)) {
+        targetHeightMm = nativeDimsMm.z * currentScaleRatio;
+      }
 
       const payload = {
         texture_res: currentTexRes,
         target_triangles: isDecimateEnabled ? currentDecimateCount : 0,
         solidify_mm: currentSolidifyMm,
+        height_mm: targetHeightMm,
         ground_z: groundZ,
         format: fmt,
         cap_cut: capHoles,
