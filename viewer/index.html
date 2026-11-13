@@ -1480,6 +1480,15 @@
       if (p) p.name = val.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
     }
 
+    let partTintsRafId = null;
+    function schedulePartTintsRender() {
+      if (partTintsRafId !== null) return;
+      partTintsRafId = requestAnimationFrame(() => {
+        partTintsRafId = null;
+        renderPartTints();
+      });
+    }
+
     function renderPartTints() {
       if (!primaryMesh) return;
       const geom = primaryMesh.geometry;
@@ -1649,7 +1658,7 @@
       const lbl = document.getElementById('knife-offset-lbl');
       if (lbl) lbl.innerText = `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`;
       updateKnifePlaneMesh();
-      renderPartTints();
+      schedulePartTintsRender();
     }
 
     function resetKnifePoints() {
@@ -1777,6 +1786,14 @@
 
     // --- PLANAR CUT CONTROLS ---
     function createCutPlane(size, center) {
+      if (cutPlaneMesh) {
+        scene.remove(cutPlaneMesh);
+        cutPlaneMesh.traverse(obj => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        });
+        cutPlaneMesh = null;
+      }
       const planeSize = Math.max(size.x, size.y, size.z) * 1.6;
       const geom = new THREE.PlaneGeometry(planeSize, planeSize);
       const mat = new THREE.MeshBasicMaterial({
@@ -1814,6 +1831,7 @@
       const mid = (minVal + maxVal) / 2.0;
       slider.value = mid;
       onPlaneSlider(mid);
+      renderPartTints();
     }
 
     function onPlaneSlider(val) {
@@ -1825,6 +1843,7 @@
       if (currentPlaneAxis === 'X') cutPlaneMesh.position.set(currentPlaneCoord, center.y, center.z);
       else if (currentPlaneAxis === 'Y') cutPlaneMesh.position.set(center.x, currentPlaneCoord, center.z);
       else cutPlaneMesh.position.set(center.x, center.y, currentPlaneCoord);
+      schedulePartTintsRender();
     }
 
     function centerPlane() {
@@ -1834,6 +1853,7 @@
                 (boundingBox.min.z + boundingBox.max.z) / 2.0;
       document.getElementById('plane-slider').value = mid;
       onPlaneSlider(mid);
+      renderPartTints();
     }
 
     // --- TAB SWITCHER & SETTINGS ---

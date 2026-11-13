@@ -136,7 +136,8 @@ def export_object(obj, obj_filepath, mf_filepath, ground_z=False):
         if color_layer and getattr(color_layer, 'data_type', None) in ('BYTE_COLOR', 'FLOAT_COLOR'):
             mesh.color_attributes.active_color = color_layer
             raw_c = np.empty(num_loops * 4, dtype=np.float32)
-            color_layer.data.foreach_get('color', raw_c)
+            color_prop = 'color_srgb' if (len(color_layer.data) > 0 and hasattr(color_layer.data[0], 'color_srgb')) else 'color'
+            color_layer.data.foreach_get(color_prop, raw_c)
             active_loop_colors = raw_c.reshape((num_loops, 4))
         else:
             active_loop_colors = np.ones((num_loops, 4), dtype=np.float32)
@@ -881,8 +882,10 @@ def main():
         py = np.clip((v * (h - 1)).astype(np.int32), 0, h - 1)
 
         sampled_colors = img_grid[py, px]
-        color_attr.data.foreach_set('color', sampled_colors.flatten())
-        log(f"Color baking completed in {time.time()-t_bake:.2f}s")
+        cs_name = getattr(getattr(image, 'colorspace_settings', None), 'name', 'sRGB')
+        bake_prop = 'color' if 'Linear' in cs_name else 'color_srgb'
+        color_attr.data.foreach_set(bake_prop, sampled_colors.flatten())
+        log(f"Color baking ({cs_name} -> {bake_prop}) completed in {time.time()-t_bake:.2f}s")
     else:
         log("No image texture found; skipping texture color baking.")
 
