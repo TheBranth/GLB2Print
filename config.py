@@ -91,6 +91,9 @@ DEFAULT_CONFIG = {
     "default_triangles": 250000,    # 0 = no decimation
     "ground_z": True,
     "scale_height_mm": 0.0,         # 0.0 = keep original
+    "bed_x_mm": 250.0,              # Max printer build width (X) in mm
+    "bed_y_mm": 250.0,              # Max printer build depth (Y) in mm
+    "bed_z_mm": 250.0,              # Max printer build height (Z) in mm
     "slicer_path": "",              # optional slicer executable path (Orca, Bambu, Prusa)
     "auto_open_slicer": False
 }

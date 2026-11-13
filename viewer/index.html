@@ -193,16 +193,17 @@
     }
     .split-tab {
       flex: 1;
-      padding: 5px;
+      padding: 5px 3px;
       border: none;
       background: transparent;
       color: #9ca3af;
-      font-size: 0.72rem;
+      font-size: 0.68rem;
       font-weight: 700;
       border-radius: 5px;
       cursor: pointer;
       transition: all 0.15s;
       text-align: center;
+      white-space: nowrap;
     }
     .split-tab.active { background: #2563eb; color: #ffffff; }
 
@@ -411,7 +412,8 @@
       justify-content: center;
     }
     .modal-box {
-      width: 480px;
+      width: 520px;
+      max-width: 94vw;
       background: #1e1f26;
       border: 1px solid rgba(255, 255, 255, 0.15);
       border-radius: 10px;
@@ -591,6 +593,7 @@
             <button class="split-tab active" id="tab-split-none" onclick="setSplitMode('none')">Full Model</button>
             <button class="split-tab" id="tab-split-planar" onclick="setSplitMode('planar')">Planar Cut</button>
             <button class="split-tab" id="tab-split-lasso" onclick="setSplitMode('lasso')">Lasso Split</button>
+            <button class="split-tab" id="tab-split-smart" onclick="setSplitMode('smart')">✨ Smart Split</button>
           </div>
 
           <!-- PLANAR PANEL -->
@@ -639,19 +642,6 @@
                 <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="detachCurrentSliceToPart()">✂ Detach to Part</button>
               </div>
             </div>
-
-            <!-- Sockets & Dowel Pins Option (Full Solid mode only) -->
-            <div id="pegs-option-container" style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
-              <label class="check-row" title="Carves recessed female sockets inside solid cut faces (9-ray containment & >= 2mm wall margin) and exports alignment_pins.obj.">
-                <input type="checkbox" id="chk-add-pegs" checked> 🧩 Alignment Sockets + Printable Pins (Flat-Bed)
-              </label>
-              <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px; line-height: 1.3;">
-                Checks negative cylinders against the outer shell (&ge; 2mm wall margin). Generates companion <code>alignment_pins.obj</code>.
-              </div>
-            </div>
-            <div id="pegs-shell-note" style="display: none; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.69rem; color: #94a3b8; line-height: 1.3;">
-              Hollow / raw shell mode: alignment pins disabled (glue cut seams by hand; select <strong>Full Solid</strong> to enable pins).
-            </div>
           </div>
 
           <!-- LASSO PANEL -->
@@ -671,6 +661,52 @@
               <button class="btn-file" style="padding: 4px;" onclick="clearSelection()">Clear Sel</button>
               <button class="btn-file" style="padding: 4px;" onclick="invertSelection()">Invert</button>
               <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="createPartFromSelection()">+ Add Part</button>
+            </div>
+          </div>
+
+          <!-- SMART AUTO-SPLIT PANEL (EXPERIMENTAL) -->
+          <div id="deck-smart" style="display: none;">
+            <div style="background: rgba(168, 85, 247, 0.08); border: 1px dashed rgba(168, 85, 247, 0.35); border-radius: 6px; padding: 7px 10px; margin-bottom: 8px; font-size: 0.72rem; line-height: 1.38;">
+              <div style="color: #c084fc; font-weight: 700;">✨ Experimental: Geometry Joint &amp; Relief Finder</div>
+              <div style="color: #9ca3af; font-size: 0.69rem; margin-top: 2px;">
+                Scans necks, joints, and sharp relief boundaries for clean planar cuts aligned to your <span id="smart-bed-label">250×250×250 mm</span> bed.
+              </div>
+            </div>
+
+            <div style="font-size: 0.72rem; color: #cbd5e1; font-weight: 600; margin-bottom: 4px;">Target Pieces:</div>
+            <div class="pill-group" id="smart-pieces-pills" style="margin-bottom: 8px;">
+              <div class="pill-btn active" onclick="setSmartTargetPieces(0, this)">Auto (Fit Bed)</div>
+              <div class="pill-btn" onclick="setSmartTargetPieces(2, this)">2</div>
+              <div class="pill-btn" onclick="setSmartTargetPieces(3, this)">3</div>
+              <div class="pill-btn" onclick="setSmartTargetPieces(4, this)">4</div>
+              <div class="pill-btn" onclick="setSmartTargetPieces(6, this)">6</div>
+            </div>
+
+            <div style="font-size: 0.72rem; color: #cbd5e1; font-weight: 600; margin-bottom: 4px;">Analysis Speed / Precision:</div>
+            <div class="pill-group" id="smart-speed-pills" style="margin-bottom: 8px;">
+              <div class="pill-btn active" id="btn-smart-fast" onclick="setSmartSpeedMode(false, this)">⚡ Fast (Default)</div>
+              <div class="pill-btn" id="btn-smart-precise" onclick="setSmartSpeedMode(true, this)">🔬 Precise (CPU)</div>
+            </div>
+
+            <button class="btn-file" id="btn-run-smart-split" style="width: 100%; padding: 7px; background: rgba(168, 85, 247, 0.22); border-color: #a855f7; color: #f3e8ff; font-weight: 700;" onclick="runSmartAutoSplit()">
+              ✨ Analyze &amp; Suggest Splits
+            </button>
+
+            <div id="smart-split-summary" style="display: none; margin-top: 7px; padding: 6px 8px; border-radius: 6px; font-size: 0.71rem; line-height: 1.35; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);"></div>
+          </div>
+
+          <!-- SOCKETS & DOWEL PINS OPTION (Shared by Planar Cut & Smart Split in Full Solid mode) -->
+          <div id="pegs-shared-wrapper" style="display: none;">
+            <div id="pegs-option-container" style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
+              <label class="check-row" title="Carves recessed female sockets inside solid cut faces (9-ray containment & >= 2mm wall margin) and exports alignment_pins.obj.">
+                <input type="checkbox" id="chk-add-pegs" checked> 🧩 Alignment Sockets + Printable Pins (Flat-Bed)
+              </label>
+              <div style="font-size: 0.68rem; color: #94a3b8; margin-top: 2px; line-height: 1.3;">
+                Checks negative cylinders against the outer shell (&ge; 2mm wall margin). Generates companion <code>alignment_pins.obj</code>.
+              </div>
+            </div>
+            <div id="pegs-shell-note" style="display: none; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06); font-size: 0.69rem; color: #94a3b8; line-height: 1.3;">
+              Hollow / raw shell mode: alignment pins disabled (glue cut seams by hand; select <strong>Full Solid</strong> to enable pins).
             </div>
           </div>
 
@@ -766,6 +802,34 @@
       </div>
       <label class="model-label">Blender Executable Path:</label>
       <input class="modal-input" id="cfg-blender-input" placeholder="e.g. D:\Blender\blender.exe">
+
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+        <label class="model-label" style="display: block; margin-bottom: 6px;">Printer Build Volume (Max Bed Size in mm):</label>
+        <div class="pill-group" style="margin-bottom: 8px;">
+          <div class="pill-btn" onclick="applyBedPreset(250, 250, 250)">250³ (U1/Bambu)</div>
+          <div class="pill-btn" onclick="applyBedPreset(350, 350, 350)">350³ (Voron)</div>
+          <div class="pill-btn" onclick="applyBedPreset(420, 420, 500)">420×420×500</div>
+          <div class="pill-btn" onclick="applyBedPreset(800, 800, 1000)">800×800×1000 (Giga)</div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+          <div>
+            <label class="model-label" style="font-size: 0.7rem;">Bed W (X) mm</label>
+            <input class="modal-input" id="cfg-bed-x" type="number" min="50" step="10" value="250">
+          </div>
+          <div>
+            <label class="model-label" style="font-size: 0.7rem;">Bed D (Y) mm</label>
+            <input class="modal-input" id="cfg-bed-y" type="number" min="50" step="10" value="250">
+          </div>
+          <div>
+            <label class="model-label" style="font-size: 0.7rem;">Bed H (Z) mm</label>
+            <input class="modal-input" id="cfg-bed-z" type="number" min="50" step="10" value="250">
+          </div>
+        </div>
+        <div style="font-size: 0.69rem; color: #94a3b8; margin-top: 5px;">
+          Used for scale warnings and Smart Auto-Split target sizing. Oversized parts warn only and always allow export.
+        </div>
+      </div>
+
       <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
         <button class="btn-file" onclick="closeSettingsModal()">Cancel</button>
         <button class="btn-file" style="background: #2563eb; color: #fff;" onclick="saveConfigFromModal()">Save Settings</button>
@@ -826,7 +890,7 @@
     let stagedParts = [];
 
     // State Variables
-    let currentSplitMode = 'none'; // 'none', 'planar', 'lasso'
+    let currentSplitMode = 'none'; // 'none', 'planar', 'lasso', 'smart'
     let currentPlaneAxis = 'X';
     let currentPlaneCoord = 0.0;
     let currentTexRes = 0; // 0 = Original 4K (crisp, zero downsampling noise)
@@ -835,6 +899,12 @@
     let isDecimateEnabled = true;
     let nativeDimsMm = null; // { x: BlenderX, y: BlenderY (depth), z: BlenderZ (height) }
     let currentScaleRatio = 1.0;
+    let bedConfig = { x: 250.0, y: 250.0, z: 250.0 };
+
+    // Smart Auto-Split State
+    let smartTargetPieces = 0; // 0 = Auto (Fit Bed)
+    let smartPreciseMode = false; // false = Fast (Default), true = Precise (CPU)
+    let smartPlaneMeshes = [];
 
     // Planar Cut & 2-Click Knife State
     let planarSubMode = 'knife'; // 'knife' or 'axis'
@@ -893,9 +963,30 @@
 
       setupEventListeners();
       setupHeartbeat();
+      fetchBedConfig();
       fetchSystemSpecs();
       checkModelAndInit();
       animate();
+    }
+
+    function fetchBedConfig() {
+      fetch('/api/config')
+        .then(r => r.json())
+        .then(cfg => {
+          bedConfig = {
+            x: parseFloat(cfg.bed_x_mm) || 250.0,
+            y: parseFloat(cfg.bed_y_mm) || 250.0,
+            z: parseFloat(cfg.bed_z_mm) || 250.0
+          };
+          updateBedConfigLabels();
+        })
+        .catch(() => {});
+    }
+
+    function updateBedConfigLabels() {
+      const lbl = document.getElementById('smart-bed-label');
+      if (lbl) lbl.innerText = `${bedConfig.x.toFixed(0)}×${bedConfig.y.toFixed(0)}×${bedConfig.z.toFixed(0)} mm`;
+      updateScaleInputsUI(false);
     }
 
     let systemSpecs = null;
@@ -994,6 +1085,9 @@
 
       if (model) scene.remove(model);
       model = null; primaryMesh = null; selectedFaceIndices.clear(); stagedParts = [];
+      clearSmartPlanePreviews();
+      const smartSummary = document.getElementById('smart-split-summary');
+      if (smartSummary) smartSummary.style.display = 'none';
       isWireframeActive = false;
       const wfBtn = document.getElementById('btn-hud-wireframe');
       if (wfBtn) { wfBtn.classList.remove('active'); wfBtn.innerText = 'Mesh Wireframe'; }
@@ -1434,6 +1528,7 @@
 
     function deletePart(id) {
       stagedParts = stagedParts.filter(p => p.id !== id);
+      if (stagedParts.length === 0) clearSmartPlanePreviews();
       refreshPartsDeckUI();
       renderPartTints();
       updateMainButtonLabel();
@@ -1443,6 +1538,9 @@
       if (stagedParts.length === 0) return;
       if (confirm("Clear all staged parts?")) {
         stagedParts = [];
+        clearSmartPlanePreviews();
+        const smartSummary = document.getElementById('smart-split-summary');
+        if (smartSummary) smartSummary.style.display = 'none';
         refreshPartsDeckUI();
         renderPartTints();
         updateMainButtonLabel();
@@ -1454,21 +1552,25 @@
       const countLbl = document.getElementById('staged-parts-count');
       const container = document.getElementById('staged-parts-container');
       if (countLbl) countLbl.innerText = stagedParts.length;
-      if (container && (currentSplitMode === 'planar' || currentSplitMode === 'lasso')) {
+      if (container && (currentSplitMode === 'planar' || currentSplitMode === 'lasso' || currentSplitMode === 'smart')) {
         container.style.display = 'block';
       }
       box.innerHTML = '';
       if (stagedParts.length === 0) {
-        box.innerHTML = '<div style="color: #64748b; font-size: 0.72rem; text-align: center; padding: 6px;">No parts staged yet. Click "Detach to Part" or draw lasso to stage.</div>';
+        box.innerHTML = '<div style="color: #64748b; font-size: 0.72rem; text-align: center; padding: 6px;">No parts staged yet. Use Detach, Lasso, or ✨ Smart Split to stage.</div>';
         return;
       }
       stagedParts.forEach(p => {
         const item = document.createElement('div');
         item.className = 'part-item';
+        const dimBadge = p.dimsText
+          ? `<span style="font-size: 0.66rem; color: ${p.overBed ? '#fbbf24' : '#94a3b8'}; margin-left: 4px;" title="${p.overBed ? 'Exceeds configured print bed — warning only, export still allowed' : 'Fits configured bed'}">${p.overBed ? '⚠ ' : ''}${p.dimsText}</span>`
+          : '';
         item.innerHTML = `
           <div class="part-dot" style="background: ${p.hex};"></div>
           <input class="part-name" value="${p.name}" onchange="updatePartName(${p.id}, this.value)">
-          <span class="part-count">${p.faces.size.toLocaleString()} faces</span>
+          ${dimBadge}
+          <span class="part-count">${p.faces.size.toLocaleString()}f</span>
           <button class="part-del" onclick="deletePart(${p.id})">✕</button>
         `;
         box.appendChild(item);
@@ -1862,9 +1964,16 @@
       document.getElementById('tab-split-none').classList.toggle('active', mode === 'none');
       document.getElementById('tab-split-planar').classList.toggle('active', mode === 'planar');
       document.getElementById('tab-split-lasso').classList.toggle('active', mode === 'lasso');
+      const tabSmart = document.getElementById('tab-split-smart');
+      if (tabSmart) tabSmart.classList.toggle('active', mode === 'smart');
 
       document.getElementById('deck-planar').style.display = (mode === 'planar') ? 'block' : 'none';
       document.getElementById('deck-lasso').style.display = (mode === 'lasso') ? 'block' : 'none';
+      const deckSmart = document.getElementById('deck-smart');
+      if (deckSmart) deckSmart.style.display = (mode === 'smart') ? 'block' : 'none';
+
+      const pegsShared = document.getElementById('pegs-shared-wrapper');
+      if (pegsShared) pegsShared.style.display = (mode === 'planar' || mode === 'smart') ? 'block' : 'none';
 
       const stagedContainer = document.getElementById('staged-parts-container');
       if (stagedContainer) {
@@ -1880,6 +1989,7 @@
         if (knifeLine) knifeLine.visible = false;
       }
 
+      smartPlaneMeshes.forEach(m => { m.visible = (mode === 'smart'); });
       if (mode !== 'lasso' && isLassoMode) toggleLassoDraw(false);
 
       refreshPartsDeckUI();
@@ -1915,7 +2025,17 @@
       if (skipField !== 'pct') document.getElementById('scale-pct').value = (currentScaleRatio * 100).toFixed(0);
       const maxScaled = Math.max(sx, sy, sz);
       const warnEl = document.getElementById('scale-bed-warn');
-      if (warnEl) warnEl.style.display = maxScaled > 250.5 ? 'inline' : 'none';
+      if (warnEl) {
+        const fitsXY = (Math.min(sx, sy) <= Math.min(bedConfig.x, bedConfig.y) + 0.5) &&
+                       (Math.max(sx, sy) <= Math.max(bedConfig.x, bedConfig.y) + 0.5);
+        const fitsZ = sz <= bedConfig.z + 0.5;
+        if (!fitsXY || !fitsZ) {
+          warnEl.innerText = `⚠ >${bedConfig.x.toFixed(0)}×${bedConfig.y.toFixed(0)}×${bedConfig.z.toFixed(0)} Bed`;
+          warnEl.style.display = 'inline';
+        } else {
+          warnEl.style.display = 'none';
+        }
+      }
       syncScalePills(maxScaled, resetNative || Math.abs(currentScaleRatio - 1.0) < 1e-4);
     }
 
@@ -2024,6 +2144,8 @@
         btn.innerText = '✂ SPLIT & EXPORT 2 PARTS';
       } else if (currentSplitMode === 'lasso') {
         btn.innerText = '🖊 DRAW & STAGE PARTS FIRST';
+      } else if (currentSplitMode === 'smart') {
+        btn.innerText = '✨ RUN SMART SPLIT FIRST';
       }
     }
 
@@ -2157,6 +2279,12 @@
         progressFill.style.width = '0%';
         statusLbl.innerText = 'Ready';
         return;
+      } else if (currentSplitMode === 'smart') {
+        alert("Please click '✨ Analyze & Suggest Splits' first before exporting!");
+        btn.disabled = false;
+        progressFill.style.width = '0%';
+        statusLbl.innerText = 'Ready';
+        return;
       }
 
       fetch('/api/convert', {
@@ -2193,11 +2321,578 @@
       });
     }
 
+    // --- SMART AUTO-SPLIT ENGINE (PLANAR JOINTS & RELIEF SEAMS) ---
+    function setSmartTargetPieces(val, el) {
+      smartTargetPieces = parseInt(val, 10) || 0;
+      const pills = document.getElementById('smart-pieces-pills');
+      if (pills) {
+        for (let p of pills.children) p.classList.remove('active');
+      }
+      if (el) el.classList.add('active');
+    }
+
+    function setSmartSpeedMode(precise, el) {
+      smartPreciseMode = !!precise;
+      const pills = document.getElementById('smart-speed-pills');
+      if (pills) {
+        for (let p of pills.children) p.classList.remove('active');
+      }
+      if (el) el.classList.add('active');
+    }
+
+    function clearSmartPlanePreviews() {
+      smartPlaneMeshes.forEach(m => {
+        scene.remove(m);
+        m.traverse(obj => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        });
+      });
+      smartPlaneMeshes = [];
+    }
+
+    function renderSmartPlanePreviews(cutsThreeRaw) {
+      clearSmartPlanePreviews();
+      if (!boundingBox || !cutsThreeRaw || cutsThreeRaw.length === 0) return;
+      const size = new THREE.Vector3();
+      boundingBox.getSize(size);
+      const planeSize = Math.max(size.x, size.y, size.z) * 1.15;
+      const defaultNormal = new THREE.Vector3(0, 0, 1);
+
+      cutsThreeRaw.forEach(c => {
+        const geom = new THREE.PlaneGeometry(planeSize, planeSize);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0xa855f7, transparent: true, opacity: 0.20, side: THREE.DoubleSide, depthWrite: false
+        });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.add(new THREE.LineSegments(
+          new THREE.EdgesGeometry(geom),
+          new THREE.LineBasicMaterial({ color: 0xc084fc })
+        ));
+        mesh.position.set(c.p0Raw[0], c.p0Raw[1], c.p0Raw[2]);
+        const nVec = new THREE.Vector3(c.n[0], c.n[1], c.n[2]).normalize();
+        mesh.quaternion.setFromUnitVectors(defaultNormal, nVec);
+        mesh.visible = (currentSplitMode === 'smart');
+        scene.add(mesh);
+        smartPlaneMeshes.push(mesh);
+      });
+    }
+
+    function _smNorm3(v) {
+      const l = Math.hypot(v[0], v[1], v[2]) || 1.0;
+      return [v[0] / l, v[1] / l, v[2] / l];
+    }
+    function _smDot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    function _smCross3(a, b) {
+      return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    }
+    function _smOrthoBasis(n) {
+      const ref = Math.abs(n[0]) < 0.85 ? [1, 0, 0] : [0, 1, 0];
+      const u = _smNorm3(_smCross3(ref, n));
+      const v = _smNorm3(_smCross3(n, u));
+      return [u, v];
+    }
+
+    function _smComputePCA(pts, indices) {
+      const n = indices.length;
+      if (n < 6) return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      let mx = 0, my = 0, mz = 0;
+      for (let k = 0; k < n; k++) {
+        const i = indices[k] * 3;
+        mx += pts[i]; my += pts[i + 1]; mz += pts[i + 2];
+      }
+      mx /= n; my /= n; mz /= n;
+      let cxx = 0, cxy = 0, cxz = 0, cyy = 0, cyz = 0, czz = 0;
+      for (let k = 0; k < n; k++) {
+        const i = indices[k] * 3;
+        const dx = pts[i] - mx, dy = pts[i + 1] - my, dz = pts[i + 2] - mz;
+        cxx += dx * dx; cxy += dx * dy; cxz += dx * dz;
+        cyy += dy * dy; cyz += dy * dz; czz += dz * dz;
+      }
+      const A = [[cxx / n, cxy / n, cxz / n], [cxy / n, cyy / n, cyz / n], [cxz / n, cyz / n, czz / n]];
+      const V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      for (let iter = 0; iter < 15; iter++) {
+        let p = 0, q = 1, maxOff = Math.abs(A[0][1]);
+        if (Math.abs(A[0][2]) > maxOff) { p = 0; q = 2; maxOff = Math.abs(A[0][2]); }
+        if (Math.abs(A[1][2]) > maxOff) { p = 1; q = 2; maxOff = Math.abs(A[1][2]); }
+        if (maxOff < 1e-9) break;
+        const app = A[p][p], aqq = A[q][q], apq = A[p][q];
+        const tau = (aqq - app) / (2 * apq);
+        const t = tau >= 0 ? 1 / (tau + Math.sqrt(1 + tau * tau)) : -1 / (-tau + Math.sqrt(1 + tau * tau));
+        const c = 1 / Math.sqrt(1 + t * t), s = t * c;
+        A[p][p] = app - t * apq; A[q][q] = aqq + t * apq; A[p][q] = A[q][p] = 0;
+        const r = 3 - p - q;
+        const arp = A[r][p], arq = A[r][q];
+        A[r][p] = A[p][r] = c * arp - s * arq; A[r][q] = A[q][r] = s * arp + c * arq;
+        for (let i = 0; i < 3; i++) {
+          const vip = V[i][p], viq = V[i][q];
+          V[i][p] = c * vip - s * viq; V[i][q] = s * vip + c * viq;
+        }
+      }
+      return [
+        { val: A[0][0], vec: _smNorm3([V[0][0], V[1][0], V[2][0]]) },
+        { val: A[1][1], vec: _smNorm3([V[0][1], V[1][1], V[2][1]]) },
+        { val: A[2][2], vec: _smNorm3([V[0][2], V[1][2], V[2][2]]) }
+      ].sort((a, b) => b.val - a.val).map(e => e.vec);
+    }
+
+    function _smBuildDirs(pcaAxes, precise) {
+      const dirs = [];
+      const addUnique = (v) => {
+        const u = _smNorm3(v);
+        for (let d of dirs) { if (Math.abs(_smDot3(d, u)) > 0.96) return; }
+        dirs.push(u);
+      };
+      addUnique([1, 0, 0]); addUnique([0, 1, 0]); addUnique([0, 0, 1]);
+      pcaAxes.forEach(addUnique);
+      for (let i = 0; i < 3; i++) {
+        for (let j = i + 1; j < 3; j++) {
+          addUnique([pcaAxes[i][0] + pcaAxes[j][0], pcaAxes[i][1] + pcaAxes[j][1], pcaAxes[i][2] + pcaAxes[j][2]]);
+          addUnique([pcaAxes[i][0] - pcaAxes[j][0], pcaAxes[i][1] - pcaAxes[j][1], pcaAxes[i][2] - pcaAxes[j][2]]);
+        }
+      }
+      if (precise) {
+        const M = 36, golden = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < M; i++) {
+          const y = (i + 0.5) / M;
+          const r = Math.sqrt(Math.max(0, 1 - y * y));
+          const theta = golden * i;
+          addUnique([Math.cos(theta) * r, y, Math.sin(theta) * r]);
+        }
+      }
+      return dirs;
+    }
+
+    function _smCountIslands(ptsMm, sampleIndices, p0, n, sideSign) {
+      const grid = 14;
+      const sub = [];
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (let k = 0; k < sampleIndices.length; k++) {
+        const idx = sampleIndices[k] * 3;
+        const x = ptsMm[idx], y = ptsMm[idx + 1], z = ptsMm[idx + 2];
+        const d = (x - p0[0]) * n[0] + (y - p0[1]) * n[1] + (z - p0[2]) * n[2];
+        if (d * sideSign > 0) {
+          sub.push(idx);
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+        }
+      }
+      if (sub.length < 4) return { count: 0, components: 0, dims: [0, 0, 0] };
+      const dx = Math.max(maxX - minX, 1e-3), dy = Math.max(maxY - minY, 1e-3), dz = Math.max(maxZ - minZ, 1e-3);
+      const occ = new Uint8Array(grid * grid * grid);
+      const activeCells = [];
+      for (let k = 0; k < sub.length; k++) {
+        const idx = sub[k];
+        const gx = Math.min(grid - 1, Math.floor(((ptsMm[idx] - minX) / dx) * (grid - 1e-4)));
+        const gy = Math.min(grid - 1, Math.floor(((ptsMm[idx + 1] - minY) / dy) * (grid - 1e-4)));
+        const gz = Math.min(grid - 1, Math.floor(((ptsMm[idx + 2] - minZ) / dz) * (grid - 1e-4)));
+        const ci = (gz * grid + gy) * grid + gx;
+        if (!occ[ci]) { occ[ci] = 1; activeCells.push(ci); }
+      }
+      let comps = 0;
+      const queue = [];
+      for (let a = 0; a < activeCells.length; a++) {
+        const start = activeCells[a];
+        if (occ[start] !== 1) continue;
+        comps++; occ[start] = 2; queue.push(start);
+        let head = 0;
+        while (head < queue.length) {
+          const cur = queue[head++];
+          const cx = cur % grid, tmp = (cur - cx) / grid, cy = tmp % grid, cz = (tmp - cy) / grid;
+          for (let oz = -1; oz <= 1; oz++) {
+            const nz = cz + oz; if (nz < 0 || nz >= grid) continue;
+            for (let oy = -1; oy <= 1; oy++) {
+              const ny = cy + oy; if (ny < 0 || ny >= grid) continue;
+              for (let ox = -1; ox <= 1; ox++) {
+                const nx = cx + ox; if (nx < 0 || nx >= grid) continue;
+                const ni = (nz * grid + ny) * grid + nx;
+                if (occ[ni] === 1) { occ[ni] = 2; queue.push(ni); }
+              }
+            }
+          }
+        }
+      }
+      return { count: sub.length, components: comps, dims: [dx, dy, dz] };
+    }
+
+    function _smFindBestSplit(ptsMm, nms, regionIndices, existingPlanesThreeMm, bedThreeMm, forceBedShrink, precise) {
+      const maxSample = precise ? 40000 : 8000;
+      const step = Math.max(1, Math.floor(regionIndices.length / maxSample));
+      const sample = [];
+      for (let i = 0; i < regionIndices.length; i += step) sample.push(regionIndices[i]);
+      if (sample.length < 30) return null;
+
+      let rMinX = Infinity, rMinY = Infinity, rMinZ = Infinity;
+      let rMaxX = -Infinity, rMaxY = -Infinity, rMaxZ = -Infinity;
+      for (let k = 0; k < sample.length; k++) {
+        const i = sample[k] * 3;
+        const x = ptsMm[i], y = ptsMm[i + 1], z = ptsMm[i + 2];
+        if (x < rMinX) rMinX = x; if (x > rMaxX) rMaxX = x;
+        if (y < rMinY) rMinY = y; if (y > rMaxY) rMaxY = y;
+        if (z < rMinZ) rMinZ = z; if (z > rMaxZ) rMaxZ = z;
+      }
+      const rDims = [rMaxX - rMinX, rMaxY - rMinY, rMaxZ - rMinZ];
+      const overBed = [
+        rDims[0] > bedThreeMm[0] ? rDims[0] / bedThreeMm[0] : 0,
+        rDims[1] > bedThreeMm[1] ? rDims[1] / bedThreeMm[1] : 0,
+        rDims[2] > bedThreeMm[2] ? rDims[2] / bedThreeMm[2] : 0
+      ];
+      const isOversized = (overBed[0] > 0 || overBed[1] > 0 || overBed[2] > 0);
+
+      const pcaAxes = _smComputePCA(ptsMm, sample);
+      const dirs = _smBuildDirs(pcaAxes, precise);
+      const B = precise ? 64 : 32;
+      const G = precise ? 22 : 14;
+      const occGrid = new Uint8Array(B * G * G);
+      const candidates = [];
+
+      for (let d = 0; d < dirs.length; d++) {
+        const n = dirs[d];
+        const dirShrinkAlign = isOversized
+          ? (Math.abs(n[0]) * overBed[0] + Math.abs(n[1]) * overBed[1] + Math.abs(n[2]) * overBed[2])
+          : 0.0;
+        if (forceBedShrink && isOversized && dirShrinkAlign < 0.25) continue;
+
+        const [u, v] = _smOrthoBasis(n);
+        let sMin = Infinity, sMax = -Infinity;
+        let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+        const sVals = new Float32Array(sample.length);
+        const uVals = new Float32Array(sample.length);
+        const vVals = new Float32Array(sample.length);
+        const nAlignVals = new Float32Array(sample.length);
+
+        for (let k = 0; k < sample.length; k++) {
+          const i = sample[k] * 3;
+          const x = ptsMm[i], y = ptsMm[i + 1], z = ptsMm[i + 2];
+          const s = x * n[0] + y * n[1] + z * n[2];
+          const uu = x * u[0] + y * u[1] + z * u[2];
+          const vv = x * v[0] + y * v[1] + z * v[2];
+          sVals[k] = s; uVals[k] = uu; vVals[k] = vv;
+          nAlignVals[k] = nms[i] * n[0] + nms[i + 1] * n[1] + nms[i + 2] * n[2];
+          if (s < sMin) sMin = s; if (s > sMax) sMax = s;
+          if (uu < uMin) uMin = uu; if (uu > uMax) uMax = uu;
+          if (vv < vMin) vMin = vv; if (vv > vMax) vMax = vv;
+        }
+        const spanS = sMax - sMin;
+        if (spanS < 20.0) continue;
+        const spanU = Math.max(uMax - uMin, 1e-3), spanV = Math.max(vMax - vMin, 1e-3);
+
+        occGrid.fill(0);
+        const cnt = new Int32Array(B);
+        const occCnt = new Int32Array(B);
+        const nAlignSum = new Float32Array(B);
+        const nAbsAlignSum = new Float32Array(B);
+
+        for (let k = 0; k < sample.length; k++) {
+          const b = Math.min(B - 1, Math.floor(((sVals[k] - sMin) / spanS) * (B - 1e-4)));
+          const gu = Math.min(G - 1, Math.floor(((uVals[k] - uMin) / spanU) * (G - 1e-4)));
+          const gv = Math.min(G - 1, Math.floor(((vVals[k] - vMin) / spanV) * (G - 1e-4)));
+          cnt[b]++;
+          const gIdx = (b * G + gv) * G + gu;
+          if (!occGrid[gIdx]) { occGrid[gIdx] = 1; occCnt[b]++; }
+          const na = nAlignVals[k];
+          nAlignSum[b] += na;
+          nAbsAlignSum[b] += Math.abs(na);
+        }
+
+        const pref = new Int32Array(B);
+        for (let b = 0; b < B; b++) pref[b] = (b > 0 ? pref[b - 1] : 0) + cnt[b];
+        const smoothOcc = new Float32Array(B);
+        let sumOcc = 0, activeBins = 0;
+        for (let b = 0; b < B; b++) {
+          const a0 = occCnt[Math.max(0, b - 1)], a1 = occCnt[b], a2 = occCnt[Math.min(B - 1, b + 1)];
+          smoothOcc[b] = 0.25 * a0 + 0.5 * a1 + 0.25 * a2;
+          if (cnt[b] > 0) { sumOcc += smoothOcc[b]; activeBins++; }
+        }
+        const meanOcc = activeBins > 0 ? (sumOcc / activeBins) : 1.0;
+        const dirOverWeight = isOversized ? (1.0 + 1.5 * dirShrinkAlign) : 1.0;
+
+        let bestBin = -1, bestScore = -Infinity;
+        for (let b = 2; b < B - 2; b++) {
+          if (cnt[b] < 4) continue;
+          const sPos = sMin + ((b + 0.5) / B) * spanS;
+          if (sPos - sMin < 12.0 || sMax - sPos < 12.0) continue;
+          const frac = pref[b] / sample.length;
+          if (frac < 0.06 || frac > 0.94) continue;
+
+          // Avoid duplicate near-coplanar cuts
+          let tooClose = false;
+          for (let ep of existingPlanesThreeMm) {
+            if (Math.abs(_smDot3(n, ep.n)) > 0.96) {
+              const dist = Math.abs(_smDot3([n[0] * sPos - ep.p0[0], n[1] * sPos - ep.p0[1], n[2] * sPos - ep.p0[2]], n));
+              if (dist < 14.0) { tooClose = true; break; }
+            }
+          }
+          if (tooClose) continue;
+
+          let leftPeak = 0, rightPeak = 0;
+          for (let i = 0; i < b; i++) if (smoothOcc[i] > leftPeak) leftPeak = smoothOcc[i];
+          for (let i = b + 1; i < B; i++) if (smoothOcc[i] > rightPeak) rightPeak = smoothOcc[i];
+
+          const cur = Math.max(smoothOcc[b], 0.5);
+          const neckRatio = (Math.min(leftPeak, rightPeak) - cur) / cur;
+          const prev2 = smoothOcc[Math.max(0, b - 2)];
+          const next2 = smoothOcc[Math.min(B - 1, b + 2)];
+          const stepRootWeight = cur <= Math.min(prev2, next2) * 1.15 ? 1.0 : 0.25;
+          const stepRatio = (Math.abs(next2 - prev2) / cur) * stepRootWeight;
+
+          const meanA1 = nAlignSum[Math.max(0, b - 1)] / Math.max(cnt[Math.max(0, b - 1)], 1);
+          const meanA2 = nAlignSum[Math.min(B - 1, b + 1)] / Math.max(cnt[Math.min(B - 1, b + 1)], 1);
+          const flatWallFrac = nAbsAlignSum[b] / Math.max(cnt[b], 1);
+          const normalJump = Math.abs(meanA2 - meanA1) + 0.35 * flatWallFrac;
+
+          const slimBonus = Math.min(3.5, Math.sqrt(meanOcc / cur));
+          const balance = 1.0 - Math.abs(frac - 0.5) * (isOversized ? 0.85 : 0.25);
+          const geomScore = (Math.max(0, neckRatio) * 1.5 + stepRatio * 0.7 + normalJump * 0.65) * slimBonus * balance * dirOverWeight;
+          if (geomScore > bestScore) { bestScore = geomScore; bestBin = b; }
+        }
+
+        if (bestBin >= 0) {
+          const sPos = sMin + ((bestBin + 0.5) / B) * spanS;
+          candidates.push({
+            score: bestScore,
+            p0: [n[0] * sPos, n[1] * sPos, n[2] * sPos],
+            n
+          });
+        }
+      }
+
+      candidates.sort((a, b) => b.score - a.score);
+      const checkTopK = precise ? candidates.length : Math.min(12, candidates.length);
+      const islSample = sample.length > 8000 ? sample.filter((_, i) => i % Math.ceil(sample.length / 8000) === 0) : sample;
+
+      let winner = null, bestFinalScore = -Infinity;
+      for (let i = 0; i < checkTopK; i++) {
+        const c = candidates[i];
+        const islP = _smCountIslands(ptsMm, islSample, c.p0, c.n, +1);
+        const islN = _smCountIslands(ptsMm, islSample, c.p0, c.n, -1);
+        if (islP.count < 10 || islN.count < 10) continue;
+        const multiIslandPenalty = 1.0 / (1.0 + 1.8 * Math.max(0, islP.components - 1) + 1.8 * Math.max(0, islN.components - 1));
+        let fitBonus = 1.0;
+        if (isOversized) {
+          const maxOverParent = Math.max(overBed[0], overBed[1], overBed[2]);
+          const maxOverP = Math.max(islP.dims[0] / bedThreeMm[0], islP.dims[1] / bedThreeMm[1], islP.dims[2] / bedThreeMm[2]);
+          const maxOverN = Math.max(islN.dims[0] / bedThreeMm[0], islN.dims[1] / bedThreeMm[1], islN.dims[2] / bedThreeMm[2]);
+          const shrink = maxOverParent - Math.max(maxOverP, maxOverN);
+          fitBonus = (shrink <= 0.03) ? 0.25 : (1.2 + shrink * 2.5 + (maxOverP <= 1.0 ? 0.35 : 0) + (maxOverN <= 1.0 ? 0.35 : 0));
+        }
+        const finalScore = c.score * multiIslandPenalty * fitBonus;
+        if (finalScore > bestFinalScore) {
+          bestFinalScore = finalScore;
+          winner = c;
+        }
+      }
+      return winner;
+    }
+
+    function _smComputeRegionDimsMm(ptsMm, faceIndices, cutNormalThree) {
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (let k = 0; k < faceIndices.length; k++) {
+        const i = faceIndices[k] * 3;
+        const x = ptsMm[i], y = ptsMm[i + 1], z = ptsMm[i + 2];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      }
+      // Also measure footprint when laid flat on primary cut face
+      let flatDims = [maxX - minX, maxZ - minZ, maxY - minY]; // Blender (W_x, D_y, H_z)
+      if (cutNormalThree) {
+        const [u, v] = _smOrthoBasis(cutNormalThree);
+        let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity, s0 = Infinity, s1 = -Infinity;
+        for (let k = 0; k < faceIndices.length; k++) {
+          const i = faceIndices[k] * 3;
+          const x = ptsMm[i], y = ptsMm[i + 1], z = ptsMm[i + 2];
+          const uu = x * u[0] + y * u[1] + z * u[2];
+          const vv = x * v[0] + y * v[1] + z * v[2];
+          const ss = x * cutNormalThree[0] + y * cutNormalThree[1] + z * cutNormalThree[2];
+          if (uu < u0) u0 = uu; if (uu > u1) u1 = uu;
+          if (vv < v0) v0 = vv; if (vv > v1) v1 = vv;
+          if (ss < s0) s0 = ss; if (ss > s1) s1 = ss;
+        }
+        flatDims = [u1 - u0, v1 - v0, s1 - s0];
+      }
+      return flatDims;
+    }
+
+    function _smExceedsBed(flatDimsMm) {
+      const [fx, fy, fz] = flatDimsMm;
+      const fitsFootprint = (Math.min(fx, fy) <= Math.min(bedConfig.x, bedConfig.y) + 0.5) &&
+                            (Math.max(fx, fy) <= Math.max(bedConfig.x, bedConfig.y) + 0.5);
+      return !(fitsFootprint && fz <= bedConfig.z + 0.5);
+    }
+
+    function runSmartAutoSplit() {
+      if (!primaryMesh || totalFaces === 0 || !boundingBox) {
+        alert("Please load a 3D model first!");
+        return;
+      }
+      const btn = document.getElementById('btn-run-smart-split');
+      const summaryEl = document.getElementById('smart-split-summary');
+      if (btn) { btn.disabled = true; btn.innerText = smartPreciseMode ? '⏳ Analyzing (Precise)...' : '⏳ Analyzing (Fast)...'; }
+
+      // Yield a paint frame so button feedback shows immediately on large Precise runs
+      setTimeout(() => {
+        try {
+          const t0 = performance.now();
+          const size = new THREE.Vector3();
+          boundingBox.getSize(size);
+          const nativeToMm = (Math.max(size.x, size.y, size.z) < 10.0) ? 1000.0 : 1.0;
+          const scaleToMm = nativeToMm * currentScaleRatio;
+
+          // Build world-space mm centers & unit normals once
+          const wMat = primaryMesh.matrixWorld;
+          const ptsMm = new Float32Array(totalFaces * 3);
+          const nms = new Float32Array(totalFaces * 3);
+          const nMat = new THREE.Matrix3().getNormalMatrix(wMat);
+          const tmpP = new THREE.Vector3(), tmpN = new THREE.Vector3();
+          for (let i = 0; i < totalFaces; i++) {
+            tmpP.set(faceCenters[i * 3], faceCenters[i * 3 + 1], faceCenters[i * 3 + 2]).applyMatrix4(wMat);
+            ptsMm[i * 3] = tmpP.x * scaleToMm;
+            ptsMm[i * 3 + 1] = tmpP.y * scaleToMm;
+            ptsMm[i * 3 + 2] = tmpP.z * scaleToMm;
+
+            tmpN.set(faceNormals[i * 3], faceNormals[i * 3 + 1], faceNormals[i * 3 + 2]).applyMatrix3(nMat).normalize();
+            nms[i * 3] = tmpN.x;
+            nms[i * 3 + 1] = tmpN.y;
+            nms[i * 3 + 2] = tmpN.z;
+          }
+
+          // Three.js Y-up bed mapping: X -> bedX, Y -> bedZ (height), Z -> bedY (depth)
+          const bedThreeMm = [bedConfig.x, bedConfig.z, bedConfig.y];
+          const isAutoFit = (smartTargetPieces === 0);
+          const maxPartsLimit = isAutoFit ? 8 : smartTargetPieces;
+
+          const allIndices = new Array(totalFaces);
+          for (let i = 0; i < totalFaces; i++) allIndices[i] = i;
+
+          let regions = [{
+            indices: allIndices,
+            planesThreeMm: [],
+            flatDims: _smComputeRegionDimsMm(ptsMm, allIndices, null)
+          }];
+          const cutPreviewsRaw = [];
+
+          while (regions.length < maxPartsLimit) {
+            let targetIdx = -1, bestPriority = -1;
+            for (let i = 0; i < regions.length; i++) {
+              const r = regions[i];
+              if (r.indices.length < 120) continue;
+              const over = _smExceedsBed(r.flatDims);
+              if (isAutoFit && !over && regions.length >= 2) continue;
+              const prio = (over ? 100.0 : 1.0) * r.indices.length;
+              if (prio > bestPriority) { bestPriority = prio; targetIdx = i; }
+            }
+            if (targetIdx < 0) break;
+            if (isAutoFit && !_smExceedsBed(regions[targetIdx].flatDims) && regions.length >= 2) break;
+
+            const reg = regions[targetIdx];
+            const best = _smFindBestSplit(ptsMm, nms, reg.indices, reg.planesThreeMm, bedThreeMm, isAutoFit, smartPreciseMode);
+            if (!best) break;
+
+            const posIdx = [], negIdx = [];
+            for (let k = 0; k < reg.indices.length; k++) {
+              const id = reg.indices[k];
+              const d = (ptsMm[id * 3] - best.p0[0]) * best.n[0] +
+                        (ptsMm[id * 3 + 1] - best.p0[1]) * best.n[1] +
+                        (ptsMm[id * 3 + 2] - best.p0[2]) * best.n[2];
+              if (d > 0) posIdx.push(id); else negIdx.push(id);
+            }
+            if (posIdx.length < 40 || negIdx.length < 40) break;
+
+            const negN = [-best.n[0], -best.n[1], -best.n[2]];
+            cutPreviewsRaw.push({
+              p0Raw: [best.p0[0] / scaleToMm, best.p0[1] / scaleToMm, best.p0[2] / scaleToMm],
+              n: best.n
+            });
+
+            regions.splice(
+              targetIdx, 1,
+              {
+                indices: posIdx,
+                planesThreeMm: [...reg.planesThreeMm, { p0: best.p0, n: best.n }],
+                flatDims: _smComputeRegionDimsMm(ptsMm, posIdx, best.n)
+              },
+              {
+                indices: negIdx,
+                planesThreeMm: [...reg.planesThreeMm, { p0: best.p0, n: negN }],
+                flatDims: _smComputeRegionDimsMm(ptsMm, negIdx, negN)
+              }
+            );
+          }
+
+          if (regions.length <= 1) {
+            if (summaryEl) {
+              summaryEl.style.display = 'block';
+              summaryEl.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+              summaryEl.innerHTML = `✅ Entire model (<b>${regions[0].flatDims.map(v => v.toFixed(0)).join('×')} mm</b>) already fits your <b>${bedConfig.x.toFixed(0)}×${bedConfig.y.toFixed(0)}×${bedConfig.z.toFixed(0)} mm</b> bed. Pick <b>2 / 3 / 4 / 6</b> above to force semantic joint splits.`;
+            }
+            return;
+          }
+
+          // Convert to stagedParts (Three.js mm -> raw Three.js -> Blender Z-up [x, -z, y])
+          const baseId = Date.now();
+          let oversizedCount = 0;
+          stagedParts = regions.map((r, idx) => {
+            const pal = PART_PALETTE[idx % PART_PALETTE.length];
+            const isOver = _smExceedsBed(r.flatDims);
+            if (isOver) oversizedCount++;
+            return {
+              id: baseId + idx,
+              name: `SmartPart_${idx + 1}`,
+              hex: pal.hex,
+              rgb: pal.rgb,
+              faces: new Set(r.indices),
+              dimsText: `${r.flatDims.map(v => Math.round(v)).join('×')}mm`,
+              overBed: isOver,
+              cut_planes: r.planesThreeMm.map(cp => {
+                const rx = cp.p0[0] / scaleToMm, ry = cp.p0[1] / scaleToMm, rz = cp.p0[2] / scaleToMm;
+                return {
+                  point: [rx, -rz, ry],
+                  normal: [cp.n[0], -cp.n[2], cp.n[1]]
+                };
+              })
+            };
+          });
+
+          renderSmartPlanePreviews(cutPreviewsRaw);
+          refreshPartsDeckUI();
+          renderPartTints();
+          updateMainButtonLabel();
+
+          const elapsedMs = Math.round(performance.now() - t0);
+          if (summaryEl) {
+            summaryEl.style.display = 'block';
+            if (oversizedCount > 0) {
+              summaryEl.style.borderColor = 'rgba(251, 191, 36, 0.5)';
+              summaryEl.innerHTML = `<span style="color:#fbbf24;font-weight:700;">⚠ ${oversizedCount} part(s) still exceed ${bedConfig.x.toFixed(0)}×${bedConfig.y.toFixed(0)}×${bedConfig.z.toFixed(0)} mm bed</span> (warning only — export still allowed). Found ${regions.length} pieces in ${elapsedMs}ms.`;
+            } else {
+              summaryEl.style.borderColor = 'rgba(74, 222, 128, 0.4)';
+              summaryEl.innerHTML = `<span style="color:#4ade80;font-weight:700;">✔ Found ${regions.length} joint/bed-fit pieces</span> in ${elapsedMs}ms (${smartPreciseMode ? 'Precise' : 'Fast'}). All parts fit ${bedConfig.x.toFixed(0)}×${bedConfig.y.toFixed(0)}×${bedConfig.z.toFixed(0)} mm bed.`;
+            }
+          }
+        } finally {
+          if (btn) { btn.disabled = false; btn.innerText = '✨ Analyze & Suggest Splits'; }
+        }
+      }, 20);
+    }
+
+    function applyBedPreset(bx, by, bz) {
+      document.getElementById('cfg-bed-x').value = bx;
+      document.getElementById('cfg-bed-y').value = by;
+      document.getElementById('cfg-bed-z').value = bz;
+    }
+
     function openSettingsModal() {
       fetch('/api/config')
         .then(r => r.json())
         .then(cfg => {
           document.getElementById('cfg-blender-input').value = cfg.blender_path || '';
+          document.getElementById('cfg-bed-x').value = cfg.bed_x_mm || 250;
+          document.getElementById('cfg-bed-y').value = cfg.bed_y_mm || 250;
+          document.getElementById('cfg-bed-z').value = cfg.bed_z_mm || 250;
           document.getElementById('settings-modal').style.display = 'flex';
         });
     }
@@ -2206,11 +2901,23 @@
     }
     function saveConfigFromModal() {
       const bPath = document.getElementById('cfg-blender-input').value.trim();
+      const bx = parseFloat(document.getElementById('cfg-bed-x').value) || 250.0;
+      const by = parseFloat(document.getElementById('cfg-bed-y').value) || 250.0;
+      const bz = parseFloat(document.getElementById('cfg-bed-z').value) || 250.0;
       fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blender_path: bPath })
-      }).then(() => closeSettingsModal());
+        body: JSON.stringify({
+          blender_path: bPath,
+          bed_x_mm: bx,
+          bed_y_mm: by,
+          bed_z_mm: bz
+        })
+      }).then(() => {
+        bedConfig = { x: bx, y: by, z: bz };
+        updateBedConfigLabels();
+        closeSettingsModal();
+      });
     }
 
     function openLogsModal() {
