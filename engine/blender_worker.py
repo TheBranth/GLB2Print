@@ -1047,6 +1047,7 @@ def main():
 
                 log(f"Part '{safe_name}': Applying {len(planes_for_part)} geometric planar cut(s)...")
                 cut_planes_for_layout = []
+                parsed_cuts = []
                 for cp in planes_for_part:
                     p_co = (
                         float(cp["point"][0]) * coord_scale_factor,
@@ -1054,13 +1055,30 @@ def main():
                         float(cp["point"][2]) * coord_scale_factor,
                     )
                     p_no = (float(cp["normal"][0]), float(cp["normal"][1]), float(cp["normal"][2]))
+                    parsed_cuts.append((p_co, p_no))
                     cut_planes_for_layout.append((p_co, p_no, 1.0))
                     bisect_mesh(part_obj, p_co, p_no, clear_outer=False, clear_inner=True, cap_cut=args.split_cap)
-                    if args.add_pegs and args.split_cap and args.solidify_mm < 0.0:
-                        plane_key = (
-                            round(p_co[0], 4), round(p_co[1], 4), round(p_co[2], 4),
-                            round(abs(p_no[0]), 3), round(abs(p_no[1]), 3), round(abs(p_no[2]), 3)
-                        )
+
+                if args.add_pegs and args.split_cap and args.solidify_mm < 0.0 and len(part_obj.data.polygons) > 0:
+                    def _canon_abs_plane(co, no):
+                        sign = 1.0
+                        for comp in no:
+                            if abs(comp) > 1e-4:
+                                sign = 1.0 if comp >= 0 else -1.0
+                                break
+                        n_s = (no[0] * sign, no[1] * sign, no[2] * sign)
+                        d_s = co[0] * n_s[0] + co[1] * n_s[1] + co[2] * n_s[2]
+                        return (round(d_s, 3), round(n_s[0], 3), round(n_s[1], 3), round(n_s[2], 3))
+
+                    def _canon_signed_plane(co, no):
+                        d_s = co[0] * no[0] + co[1] * no[1] + co[2] * no[2]
+                        return (round(d_s, 3), round(no[0], 3), round(no[1], 3), round(no[2], 3))
+
+                    for ci, (p_co, p_no) in enumerate(parsed_cuts):
+                        other_bounds = tuple(sorted(
+                            _canon_signed_plane(oc, on) for oj, (oc, on) in enumerate(parsed_cuts) if oj != ci
+                        ))
+                        plane_key = (_canon_abs_plane(p_co, p_no), other_bounds)
                         cached = plane_socket_cache.get(plane_key)
                         s_carved, r_eff, d_eff_mm = carve_part_sockets(
                             part_obj, p_co, p_no,

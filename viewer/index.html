@@ -613,10 +613,13 @@
                   Click 2 points across any joint to slice on bias. Orbit freely with drag.
                 </div>
               </div>
-              <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+              <div style="display: flex; gap: 6px; margin-bottom: 6px;">
                 <button class="btn-file" style="padding: 4px;" onclick="flipCutSide()">⇄ Flip Side</button>
                 <button class="btn-file" style="padding: 4px;" onclick="resetKnifePoints()">🔄 Reset</button>
-                <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="detachCurrentSliceToPart()">✂ Detach to Part</button>
+              </div>
+              <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.16); border-color: #3b82f6;" onclick="detachCurrentSliceToPart()" title="Detaches only the cyan side into a staged part">✂ Detach Side</button>
+                <button class="btn-file" style="padding: 4px; background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #d1fae5;" onclick="sliceAllAtActivePlane()" title="Splits the model (or all existing parts) across this cut plane — use 2 cuts to quarter cleanly">⊞ Slice All Here</button>
               </div>
               <div class="slider-header">
                 <span class="model-label">Nudge Cut Plane:</span>
@@ -637,9 +640,13 @@
                 <span class="slider-val" id="plane-coord-lbl">0.00 mm</span>
               </div>
               <input type="range" id="plane-slider" min="-100" max="100" step="0.1" value="0" oninput="onPlaneSlider(this.value)">
-              <div style="display: flex; justify-content: space-between; margin-top: 6px; margin-bottom: 6px;">
+              <div style="display: flex; gap: 6px; margin-top: 6px; margin-bottom: 6px;">
+                <button class="btn-file" style="padding: 4px;" onclick="flipCutSide()">⇄ Flip Side</button>
                 <button class="btn-file" style="padding: 4px;" onclick="centerPlane()">⌖ Center Plane</button>
-                <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.2); border-color: #3b82f6;" onclick="detachCurrentSliceToPart()">✂ Detach to Part</button>
+              </div>
+              <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                <button class="btn-file" style="padding: 4px; background: rgba(59, 130, 246, 0.16); border-color: #3b82f6;" onclick="detachCurrentSliceToPart()" title="Detaches only the cyan side of remaining geometry into a staged part">✂ Detach Side</button>
+                <button class="btn-file" style="padding: 4px; background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #d1fae5;" onclick="sliceAllAtActivePlane()" title="Splits the model (or all existing parts) along this plane — click once on X and once on Z to quarter">⊞ Slice All Here</button>
               </div>
             </div>
           </div>
@@ -888,11 +895,13 @@
       { hex: '#eab308', rgb: [234, 179, 8] }    // Yellow
     ];
     let stagedParts = [];
+    let unassignedConstraintPlanes = [];
 
     // State Variables
     let currentSplitMode = 'none'; // 'none', 'planar', 'lasso', 'smart'
     let currentPlaneAxis = 'X';
     let currentPlaneCoord = 0.0;
+    let currentPlaneSign = 1; // +1 or -1 (Flip Side in World Axes mode)
     let currentTexRes = 0; // 0 = Original 4K (crisp, zero downsampling noise)
     let currentSolidifyMm = -1; // -1 = Full Solid (Slicer Infill); > 0 = hollow shell thickness in mm; 0 = raw mesh
     let currentDecimateCount = 250000;
@@ -1084,7 +1093,8 @@
       document.getElementById('spinner-text').innerText = 'Loading 3D Model...';
 
       if (model) scene.remove(model);
-      model = null; primaryMesh = null; selectedFaceIndices.clear(); stagedParts = [];
+      model = null; primaryMesh = null; selectedFaceIndices.clear(); stagedParts = []; unassignedConstraintPlanes = [];
+      currentPlaneSign = 1;
       clearSmartPlanePreviews();
       const smartSummary = document.getElementById('smart-split-summary');
       if (smartSummary) smartSummary.style.display = 'none';
@@ -1502,17 +1512,24 @@
       }
       const partIdx = stagedParts.length;
       const pal = PART_PALETTE[partIdx % PART_PALETTE.length];
-      const remainingPlanes = [];
-      stagedParts.forEach(p => {
-        if (p.cut_planes && p.cut_planes.length > 0) {
-          p.cut_planes.forEach(cp => {
-            remainingPlanes.push({
-              point: [cp.point[0], cp.point[1], cp.point[2]],
-              normal: [-cp.normal[0], -cp.normal[1], -cp.normal[2]]
+      let remainingPlanes = [];
+      if (unassignedConstraintPlanes.length > 0) {
+        remainingPlanes = unassignedConstraintPlanes.map(cp => ({
+          point: [cp.point[0], cp.point[1], cp.point[2]],
+          normal: [cp.normal[0], cp.normal[1], cp.normal[2]]
+        }));
+      } else {
+        stagedParts.forEach(p => {
+          if (p.cut_planes && p.cut_planes.length > 0) {
+            p.cut_planes.forEach(cp => {
+              remainingPlanes.push({
+                point: [cp.point[0], cp.point[1], cp.point[2]],
+                normal: [-cp.normal[0], -cp.normal[1], -cp.normal[2]]
+              });
             });
-          });
-        }
-      });
+          }
+        });
+      }
       stagedParts.push({
         id: Date.now(),
         name: `Part_${partIdx + 1}_Remaining`,
@@ -1521,6 +1538,7 @@
         faces: new Set(unassigned),
         cut_planes: remainingPlanes
       });
+      unassignedConstraintPlanes = [];
       refreshPartsDeckUI();
       renderPartTints();
       updateMainButtonLabel();
@@ -1528,7 +1546,10 @@
 
     function deletePart(id) {
       stagedParts = stagedParts.filter(p => p.id !== id);
-      if (stagedParts.length === 0) clearSmartPlanePreviews();
+      if (stagedParts.length === 0) {
+        unassignedConstraintPlanes = [];
+        clearSmartPlanePreviews();
+      }
       refreshPartsDeckUI();
       renderPartTints();
       updateMainButtonLabel();
@@ -1538,6 +1559,7 @@
       if (stagedParts.length === 0) return;
       if (confirm("Clear all staged parts?")) {
         stagedParts = [];
+        unassignedConstraintPlanes = [];
         clearSmartPlanePreviews();
         const smartSummary = document.getElementById('smart-split-summary');
         if (smartSummary) smartSummary.style.display = 'none';
@@ -1617,9 +1639,9 @@
           pNo = knifeNormal;
         } else if (planarSubMode === 'axis' && boundingBox) {
           const center = new THREE.Vector3(); boundingBox.getCenter(center);
-          if (currentPlaneAxis === 'X') { pPos = new THREE.Vector3(currentPlaneCoord, center.y, center.z); pNo = new THREE.Vector3(1, 0, 0); }
-          else if (currentPlaneAxis === 'Y') { pPos = new THREE.Vector3(center.x, currentPlaneCoord, center.z); pNo = new THREE.Vector3(0, 1, 0); }
-          else { pPos = new THREE.Vector3(center.x, center.y, currentPlaneCoord); pNo = new THREE.Vector3(0, 0, 1); }
+          if (currentPlaneAxis === 'X') { pPos = new THREE.Vector3(currentPlaneCoord, center.y, center.z); pNo = new THREE.Vector3(currentPlaneSign, 0, 0); }
+          else if (currentPlaneAxis === 'Y') { pPos = new THREE.Vector3(center.x, currentPlaneCoord, center.z); pNo = new THREE.Vector3(0, currentPlaneSign, 0); }
+          else { pPos = new THREE.Vector3(center.x, center.y, currentPlaneCoord); pNo = new THREE.Vector3(0, 0, currentPlaneSign); }
         }
 
         if (pPos && pNo) {
@@ -1733,6 +1755,11 @@
     }
 
     function flipCutSide() {
+      if (planarSubMode === 'axis') {
+        currentPlaneSign = -currentPlaneSign;
+        renderPartTints();
+        return;
+      }
       if (knifeNormal) {
         knifeNormal.negate();
         knifeOffset = -knifeOffset;
@@ -1812,37 +1839,42 @@
       renderPartTints();
     }
 
+    function getActivePlanarCutThree() {
+      let planePos = new THREE.Vector3();
+      let planeNo = new THREE.Vector3();
+      if (planarSubMode === 'knife') {
+        if (!knifeMidpoint || !knifeNormal) {
+          alert("Please click 2 points on the model to place a knife plane first!");
+          return null;
+        }
+        planePos.copy(knifeMidpoint).addScaledVector(knifeNormal, knifeOffset);
+        planeNo.copy(knifeNormal);
+      } else {
+        if (!boundingBox) return null;
+        const center = new THREE.Vector3();
+        boundingBox.getCenter(center);
+        if (currentPlaneAxis === 'X') {
+          planePos.set(currentPlaneCoord, center.y, center.z);
+          planeNo.set(currentPlaneSign, 0, 0);
+        } else if (currentPlaneAxis === 'Y') {
+          planePos.set(center.x, currentPlaneCoord, center.z);
+          planeNo.set(0, currentPlaneSign, 0);
+        } else {
+          planePos.set(center.x, center.y, currentPlaneCoord);
+          planeNo.set(0, 0, currentPlaneSign);
+        }
+      }
+      return { planePos, planeNo };
+    }
+
     function detachCurrentSliceToPart() {
       if (!primaryMesh || totalFaces === 0) {
         alert("Please load a 3D model first!");
         return;
       }
-
-      let planePos = new THREE.Vector3();
-      let planeNo = new THREE.Vector3();
-
-      if (planarSubMode === 'knife') {
-        if (!knifeMidpoint || !knifeNormal) {
-          alert("Please click 2 points on the model to place a knife plane first!");
-          return;
-        }
-        planePos.copy(knifeMidpoint).addScaledVector(knifeNormal, knifeOffset);
-        planeNo.copy(knifeNormal);
-      } else {
-        if (!boundingBox) return;
-        const center = new THREE.Vector3();
-        boundingBox.getCenter(center);
-        if (currentPlaneAxis === 'X') {
-          planePos.set(currentPlaneCoord, center.y, center.z);
-          planeNo.set(1, 0, 0);
-        } else if (currentPlaneAxis === 'Y') {
-          planePos.set(center.x, currentPlaneCoord, center.z);
-          planeNo.set(0, 1, 0);
-        } else {
-          planePos.set(center.x, center.y, currentPlaneCoord);
-          planeNo.set(0, 0, 1);
-        }
-      }
+      const cut = getActivePlanarCutThree();
+      if (!cut) return;
+      const { planePos, planeNo } = cut;
 
       // Collect already assigned faces
       const assigned = new Set();
@@ -1862,24 +1894,181 @@
       }
 
       if (sliceFaces.length === 0) {
-        alert("No unassigned faces found on this side of the cut plane!\nTry clicking 'Flip Side' or nudging the cut plane.");
+        alert("No unassigned faces found on this side of the cut plane!\nTry clicking '⇄ Flip Side' or nudging the cut plane.");
         return;
       }
 
+      const posPlaneB = {
+        point: [planePos.x, -planePos.z, planePos.y],
+        normal: [planeNo.x, -planeNo.z, planeNo.y]
+      };
+      const negPlaneB = {
+        point: [planePos.x, -planePos.z, planePos.y],
+        normal: [-planeNo.x, planeNo.z, -planeNo.y]
+      };
+
       const partIdx = stagedParts.length;
       const pal = PART_PALETTE[partIdx % PART_PALETTE.length];
-      const part = {
+      const partPlanes = unassignedConstraintPlanes.map(cp => ({
+        point: [cp.point[0], cp.point[1], cp.point[2]],
+        normal: [cp.normal[0], cp.normal[1], cp.normal[2]]
+      }));
+      partPlanes.push(posPlaneB);
+
+      stagedParts.push({
         id: Date.now(),
         name: `Part_${partIdx + 1}`,
         hex: pal.hex,
         rgb: pal.rgb,
         faces: new Set(sliceFaces),
-        cut_planes: [{
-          point: [planePos.x, -planePos.z, planePos.y],
-          normal: [planeNo.x, -planeNo.z, planeNo.y]
-        }]
+        cut_planes: partPlanes
+      });
+      unassignedConstraintPlanes.push(negPlaneB);
+      if (planarSubMode === 'knife') resetKnifePoints();
+      refreshPartsDeckUI();
+      renderPartTints();
+      updateMainButtonLabel();
+    }
+
+    function sliceAllAtActivePlane() {
+      if (!primaryMesh || totalFaces === 0) {
+        alert("Please load a 3D model first!");
+        return;
+      }
+      const cut = getActivePlanarCutThree();
+      if (!cut) return;
+      const { planePos, planeNo } = cut;
+
+      const posPlaneB = {
+        point: [planePos.x, -planePos.z, planePos.y],
+        normal: [planeNo.x, -planeNo.z, planeNo.y]
       };
-      stagedParts.push(part);
+      const negPlaneB = {
+        point: [planePos.x, -planePos.z, planePos.y],
+        normal: [-planeNo.x, planeNo.z, -planeNo.y]
+      };
+
+      const fWorld = new THREE.Vector3();
+      const worldMat = primaryMesh.matrixWorld;
+      const isPosFace = new Uint8Array(totalFaces);
+      for (let i = 0; i < totalFaces; i++) {
+        fWorld.set(faceCenters[i * 3], faceCenters[i * 3 + 1], faceCenters[i * 3 + 2]).applyMatrix4(worldMat);
+        if (fWorld.sub(planePos).dot(planeNo) > 0) isPosFace[i] = 1;
+      }
+
+      const nextParts = [];
+      const baseId = Date.now();
+      let splitCount = 0;
+
+      if (stagedParts.length === 0) {
+        const posFaces = new Set(), negFaces = new Set();
+        for (let i = 0; i < totalFaces; i++) {
+          if (isPosFace[i]) posFaces.add(i); else negFaces.add(i);
+        }
+        if (posFaces.size === 0 || negFaces.size === 0) {
+          alert("This cut plane does not cross the model. Nudge the plane inside the mesh first.");
+          return;
+        }
+        nextParts.push({
+          id: baseId,
+          name: 'Part_1',
+          hex: PART_PALETTE[0].hex,
+          rgb: PART_PALETTE[0].rgb,
+          faces: posFaces,
+          cut_planes: [posPlaneB]
+        });
+        nextParts.push({
+          id: baseId + 1,
+          name: 'Part_2',
+          hex: PART_PALETTE[1].hex,
+          rgb: PART_PALETTE[1].rgb,
+          faces: negFaces,
+          cut_planes: [negPlaneB]
+        });
+        splitCount = 1;
+      } else {
+        const assigned = new Set();
+        stagedParts.forEach(p => {
+          p.faces.forEach(f => assigned.add(f));
+          if (!p.cut_planes || p.cut_planes.length === 0) {
+            nextParts.push(p);
+            return;
+          }
+          const posFaces = new Set(), negFaces = new Set();
+          p.faces.forEach(f => {
+            if (isPosFace[f]) posFaces.add(f); else negFaces.add(f);
+          });
+          if (posFaces.size >= 8 && negFaces.size >= 8) {
+            const idxA = nextParts.length;
+            const palA = PART_PALETTE[idxA % PART_PALETTE.length];
+            nextParts.push({
+              id: baseId + idxA,
+              name: `Part_${idxA + 1}`,
+              hex: palA.hex,
+              rgb: palA.rgb,
+              faces: posFaces,
+              cut_planes: [...p.cut_planes.map(cp => ({ point: [...cp.point], normal: [...cp.normal] })), posPlaneB]
+            });
+            const idxB = nextParts.length;
+            const palB = PART_PALETTE[idxB % PART_PALETTE.length];
+            nextParts.push({
+              id: baseId + idxB,
+              name: `Part_${idxB + 1}`,
+              hex: palB.hex,
+              rgb: palB.rgb,
+              faces: negFaces,
+              cut_planes: [...p.cut_planes.map(cp => ({ point: [...cp.point], normal: [...cp.normal] })), negPlaneB]
+            });
+            splitCount++;
+          } else {
+            const idxK = nextParts.length;
+            const palK = PART_PALETTE[idxK % PART_PALETTE.length];
+            nextParts.push({
+              ...p,
+              hex: palK.hex,
+              rgb: palK.rgb,
+              name: `Part_${idxK + 1}`
+            });
+          }
+        });
+
+        // Also split any unassigned remainder so 1st Detach + 2nd Slice All yields complete quarters
+        const remPos = new Set(), remNeg = new Set();
+        for (let i = 0; i < totalFaces; i++) {
+          if (assigned.has(i)) continue;
+          if (isPosFace[i]) remPos.add(i); else remNeg.add(i);
+        }
+        if (remPos.size >= 8 && remNeg.size >= 8 && unassignedConstraintPlanes.length > 0) {
+          const baseRemPlanes = unassignedConstraintPlanes.map(cp => ({ point: [...cp.point], normal: [...cp.normal] }));
+          const idx1 = nextParts.length;
+          nextParts.push({
+            id: baseId + idx1,
+            name: `Part_${idx1 + 1}`,
+            hex: PART_PALETTE[idx1 % PART_PALETTE.length].hex,
+            rgb: PART_PALETTE[idx1 % PART_PALETTE.length].rgb,
+            faces: remPos,
+            cut_planes: [...baseRemPlanes, posPlaneB]
+          });
+          const idx2 = nextParts.length;
+          nextParts.push({
+            id: baseId + idx2,
+            name: `Part_${idx2 + 1}`,
+            hex: PART_PALETTE[idx2 % PART_PALETTE.length].hex,
+            rgb: PART_PALETTE[idx2 % PART_PALETTE.length].rgb,
+            faces: remNeg,
+            cut_planes: [...baseRemPlanes, negPlaneB]
+          });
+          unassignedConstraintPlanes = [];
+          splitCount++;
+        }
+
+        if (splitCount === 0) {
+          alert("This cut plane does not bisect any staged planar part. Try another axis or move the slider.");
+          return;
+        }
+      }
+
+      stagedParts = nextParts;
       if (planarSubMode === 'knife') resetKnifePoints();
       refreshPartsDeckUI();
       renderPartTints();
@@ -2264,9 +2453,9 @@
         } else {
           const center = new THREE.Vector3();
           if (boundingBox) boundingBox.getCenter(center);
-          if (currentPlaneAxis === 'X') { pPos.set(currentPlaneCoord, center.y, center.z); pNo.set(1, 0, 0); }
-          else if (currentPlaneAxis === 'Y') { pPos.set(center.x, currentPlaneCoord, center.z); pNo.set(0, 1, 0); }
-          else { pPos.set(center.x, center.y, currentPlaneCoord); pNo.set(0, 0, 1); }
+          if (currentPlaneAxis === 'X') { pPos.set(currentPlaneCoord, center.y, center.z); pNo.set(currentPlaneSign, 0, 0); }
+          else if (currentPlaneAxis === 'Y') { pPos.set(center.x, currentPlaneCoord, center.z); pNo.set(0, currentPlaneSign, 0); }
+          else { pPos.set(center.x, center.y, currentPlaneCoord); pNo.set(0, 0, currentPlaneSign); }
         }
 
         // Convert Three.js coordinates (Y-up) to Blender coordinates (Z-up):
