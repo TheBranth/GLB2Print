@@ -709,27 +709,48 @@ def carve_part_sockets(part_obj, plane_co, plane_no, socket_radius_mm=2.0, socke
 
 
 def export_alignment_pins(output_3mf_path, output_obj_path, num_pins=4, pin_radius_mm=0.95, pin_length_mm=3.0):
-    """Exports printable cylindrical dowel pins to outputs/alignment_pins.3mf and .obj."""
+    """Exports printable chamfered cylindrical dowel pins to outputs/alignment_pins.3mf and .obj."""
     import mathutils
     bm = bmesh.new()
-    r = pin_radius_mm
-    h = pin_length_mm
-    spacing = r * 4.0
+    r = float(pin_radius_mm)
+    h = float(pin_length_mm)
+    chamfer = min(0.40, h * 0.15, r * 0.35)
+    r_tip = max(0.35, r - chamfer)
+    spacing = max(r * 4.0, 6.0)
+    segs = 24
 
     for i in range(num_pins):
         col = i % 2
         row = i // 2
-        loc = mathutils.Vector((col * spacing, row * spacing, h / 2.0))
-        M = mathutils.Matrix.Translation(loc)
+        cx = col * spacing
+        cy = row * spacing
+        # Bottom chamfer cone (z: 0 -> chamfer)
         bmesh.ops.create_cone(
-            bm,
-            cap_ends=True,
-            segments=24,
-            radius1=r,
-            radius2=r,
-            depth=h,
-            matrix=M
+            bm, cap_ends=False, segments=segs,
+            radius1=r_tip, radius2=r, depth=chamfer,
+            matrix=mathutils.Matrix.Translation((cx, cy, chamfer * 0.5))
         )
+        # Main straight barrel (z: chamfer -> h - chamfer)
+        barrel_h = max(0.4, h - 2.0 * chamfer)
+        bmesh.ops.create_cone(
+            bm, cap_ends=False, segments=segs,
+            radius1=r, radius2=r, depth=barrel_h,
+            matrix=mathutils.Matrix.Translation((cx, cy, chamfer + barrel_h * 0.5))
+        )
+        # Top chamfer cone (z: h - chamfer -> h)
+        bmesh.ops.create_cone(
+            bm, cap_ends=False, segments=segs,
+            radius1=r, radius2=r_tip, depth=chamfer,
+            matrix=mathutils.Matrix.Translation((cx, cy, h - chamfer * 0.5))
+        )
+        # Cap bottom/top and merge seam rings cleanly
+        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-4)
+
+    # Cap any open circular ends (z=0 and z=h) and ensure outward normals
+    open_edges = [e for e in bm.edges if e.is_boundary]
+    if open_edges:
+        bmesh.ops.holes_fill(bm, edges=open_edges, sides=segs)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
 
     mesh = bpy.data.meshes.new('AlignmentPinsMesh')
     bm.to_mesh(mesh)
@@ -789,9 +810,9 @@ def add_alignment_sockets_and_dowel_pins(part1, part2, plane_co, plane_no, outpu
     carve_sockets_at_positions(part2, sockets_3d, plane_no, r_socket, socket_depth_mm=clamped_depth_mm, sign=1.0)
 
     r_mm = r_socket / scale_fac
-    pin_r_mm = max(0.5, round(r_mm - 0.15, 2))
+    pin_r_mm = max(0.5, round(r_mm - 0.30, 2))
     pin_len_mm = max(1.0, round(clamped_depth_mm * 2.0 - 0.6, 2))
-    log(f"Dual alignment sockets carved successfully into both parts (r={r_mm:.2f}mm, depth={clamped_depth_mm:.2f}mm).")
+    log(f"Dual alignment sockets carved (r={r_mm:.2f}mm, d={r_mm*2:.2f}mm, depth={clamped_depth_mm:.2f}mm); pins r={pin_r_mm:.2f}mm (d={pin_r_mm*2:.2f}mm), len={pin_len_mm:.2f}mm.")
     export_alignment_pins(
         output_3mf_path,
         output_obj_path,
@@ -1183,8 +1204,10 @@ def main():
         if args.add_pegs and total_sockets_carved > 0:
             num_pins = max(2, total_sockets_carved // 2)
             clamped_depth = min(carved_depths_mm) if carved_depths_mm else 3.0
-            pin_r_mm = max(0.5, round(min(carved_radii_mm) - 0.15, 2)) if carved_radii_mm else 1.85
+            min_sock_r = min(carved_radii_mm) if carved_radii_mm else 2.0
+            pin_r_mm = max(0.5, round(min_sock_r - 0.30, 2))
             pin_len_mm = max(1.0, round(clamped_depth * 2.0 - 0.6, 2))
+            log(f"Exporting {num_pins} pin(s): r={pin_r_mm:.2f}mm (d={pin_r_mm*2:.2f}mm) for min socket r={min_sock_r:.2f}mm (d={min_sock_r*2:.2f}mm), len={pin_len_mm:.2f}mm.")
             export_alignment_pins(
                 args.output_3mf, args.output_obj,
                 num_pins=num_pins, pin_radius_mm=pin_r_mm, pin_length_mm=pin_len_mm
