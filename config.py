@@ -94,6 +94,8 @@ DEFAULT_CONFIG = {
     "bed_x_mm": 250.0,              # Max printer build width (X) in mm
     "bed_y_mm": 250.0,              # Max printer build depth (Y) in mm
     "bed_z_mm": 250.0,              # Max printer build height (Z) in mm
+    "presets": {},                  # Saved user print/dither/mesh presets
+    "active_preset": "",            # Last selected preset name
     "slicer_path": "",              # optional slicer executable path (Orca, Bambu, Prusa)
     "auto_open_slicer": False
 }

@@ -470,8 +470,30 @@
       </div>
 
       <div id="sidebar-content">
+        <!-- 0. MODE TOGGLE & PRESETS BAR -->
+        <div class="card" style="padding: 9px 11px;">
+          <div class="split-tabs" style="margin-bottom: 8px;">
+            <button class="split-tab active" id="btn-ui-easy" onclick="setUiMode('easy')">⚡ Easy Convert</button>
+            <button class="split-tab" id="btn-ui-advanced" onclick="setUiMode('advanced')">🛠 Advanced Wizard</button>
+          </div>
+          <div style="display: flex; gap: 5px; align-items: center;">
+            <select id="preset-select" onchange="onPresetSelected(this.value)" style="flex:1; background:#141418; color:#e2e8f0; border:1px solid rgba(255,255,255,0.14); border-radius:6px; padding:5px 7px; font-size:0.73rem; outline:none;">
+              <option value="">-- Select Preset --</option>
+            </select>
+            <button class="btn-file" style="flex:0 0 auto; padding:5px 8px; font-size:0.72rem;" onclick="saveCurrentAsPreset()" title="Save current settings as a reusable preset">💾 Save</button>
+            <button class="btn-file" id="btn-del-preset" style="flex:0 0 auto; padding:5px 8px; font-size:0.72rem; color:#f87171;" onclick="deleteSelectedPreset()" title="Delete selected custom preset">🗑</button>
+          </div>
+          <div id="wizard-step-bar" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
+            <div class="pill-group">
+              <div class="pill-btn active" id="wiz-pill-1" onclick="setWizardStep(1)">1. Size &amp; Mesh</div>
+              <div class="pill-btn" id="wiz-pill-2" onclick="setWizardStep(2)">2. Colors</div>
+              <div class="pill-btn" id="wiz-pill-3" onclick="setWizardStep(3)">3. Split &amp; Pins</div>
+            </div>
+          </div>
+        </div>
+
         <!-- 1. MODEL INFO CARD -->
-        <div class="card">
+        <div class="card" id="card-model-info">
           <div class="card-title">
             <span id="card-model-name">Model</span>
             <span style="font-size: 0.68rem; color: #38bdf8; background: rgba(56, 189, 248, 0.15); padding: 1px 6px; border-radius: 4px;">GLB / GLTF</span>
@@ -538,7 +560,7 @@
         </div>
 
         <!-- 3. TEXTURE RESOLUTION -->
-        <div class="card">
+        <div class="card" id="card-tex-res">
           <div class="card-title">Pre-Bake Texture Res</div>
           <div class="pill-group" id="tex-res-pills">
             <div class="pill-btn active" onclick="setTexRes(0, this)">Original (Crisp)</div>
@@ -596,7 +618,7 @@
         </div>
 
         <!-- 3. PRINT VOLUME / SHELL WALL MODE -->
-        <div class="card">
+        <div class="card" id="card-volume-mode">
           <div class="card-title">
             <span>Print Volume Mode</span>
             <span style="font-size: 0.68rem; color: #38bdf8; font-weight: 600;">Slicer Ready</span>
@@ -613,7 +635,7 @@
         </div>
 
         <!-- 3. DECIMATION -->
-        <div class="card">
+        <div class="card" id="card-decimation">
           <div class="card-title">
             <span>Smart Decimation</span>
             <label class="check-row" style="margin: 0; font-size: 0.72rem;">
@@ -634,7 +656,7 @@
         </div>
 
         <!-- 4. SPLITTING & STAGING DECK -->
-        <div class="card">
+        <div class="card" id="card-splitting">
           <div class="card-title">Splitting & Staging</div>
           <div class="split-tabs">
             <button class="split-tab active" id="tab-split-none" onclick="setSplitMode('none')">Full Model</button>
@@ -786,7 +808,7 @@
         </div>
 
         <!-- 5. PRINT BED PREP & FORMATS -->
-        <div class="card">
+        <div class="card" id="card-bed-export">
           <div class="card-title">3D Print Bed & Export</div>
           <label class="check-row">
             <input type="checkbox" id="chk-ground-z" checked> Auto-ground to bed (Z = 0.0)
@@ -796,6 +818,12 @@
               <input type="checkbox" id="chk-fmt-obj" checked disabled> OBJ (vertex colors)
             </label>
           </div>
+        </div>
+
+        <!-- WIZARD NAVIGATION (Advanced Mode only) -->
+        <div id="wizard-nav-footer" style="display: none; justify-content: space-between; gap: 8px; margin-top: 2px; margin-bottom: 6px;">
+          <button class="btn-file" id="wiz-btn-prev" onclick="setWizardStep(wizardStep - 1)">← Back</button>
+          <button class="btn-file" id="wiz-btn-next" style="background: rgba(37, 99, 235, 0.25); border-color: #3b82f6; color: #fff; font-weight: 700;" onclick="setWizardStep(wizardStep + 1)">Next Step →</button>
         </div>
       </div>
 
@@ -988,6 +1016,35 @@
     let lassoPoints = [];
     let lassoCanvas, lassoCtx;
 
+    // UI Mode & Presets State
+    let uiMode = 'easy'; // 'easy' or 'advanced'
+    let wizardStep = 1;  // 1, 2, 3
+    let savedPresets = {};
+    let activePresetName = '';
+    const BUILTIN_PRESETS = {
+      'Standard · 250k Full Solid': {
+        builtin: true,
+        texture_res: 0, solidify_mm: -1, decimate_enabled: true, target_triangles: 250000,
+        ground_z: true, cap_holes: true, add_pegs: true, export_mm: true,
+        dither_mode: 'none', palette: ['#1a1a1a', '#8c4a2b', '#c8a47e', '#ece6dc'],
+        dither_strength: 0.80, dither_dot_mm: 1.2
+      },
+      '4-Color Dither · 0.4mm Nozzle': {
+        builtin: true,
+        texture_res: 0, solidify_mm: -1, decimate_enabled: true, target_triangles: 250000,
+        ground_z: true, cap_holes: true, add_pegs: true, export_mm: true,
+        dither_mode: 'dither', palette: ['#1a1a1a', '#8c4a2b', '#c8a47e', '#ece6dc'],
+        dither_strength: 0.80, dither_dot_mm: 1.2
+      },
+      'Fast Draft (100k · 1024px)': {
+        builtin: true,
+        texture_res: 1024, solidify_mm: -1, decimate_enabled: true, target_triangles: 100000,
+        ground_z: true, cap_holes: true, add_pegs: true, export_mm: true,
+        dither_mode: 'none', palette: ['#1a1a1a', '#8c4a2b', '#c8a47e', '#ece6dc'],
+        dither_strength: 0.80, dither_dot_mm: 1.2
+      }
+    };
+
     function initApp() {
       const container = document.getElementById('canvas-container');
 
@@ -1028,10 +1085,205 @@
 
       setupEventListeners();
       setupHeartbeat();
+      applyUiLayout();
       fetchBedConfig();
       fetchSystemSpecs();
       checkModelAndInit();
       animate();
+    }
+
+    function setUiMode(mode) {
+      uiMode = (mode === 'advanced') ? 'advanced' : 'easy';
+      applyUiLayout();
+    }
+
+    function setWizardStep(step) {
+      wizardStep = Math.max(1, Math.min(3, step));
+      applyUiLayout();
+      const sc = document.getElementById('sidebar-content');
+      if (sc) sc.scrollTop = 0;
+    }
+
+    function applyUiLayout() {
+      const btnE = document.getElementById('btn-ui-easy');
+      const btnA = document.getElementById('btn-ui-advanced');
+      if (btnE) btnE.classList.toggle('active', uiMode === 'easy');
+      if (btnA) btnA.classList.toggle('active', uiMode === 'advanced');
+
+      const wizBar = document.getElementById('wizard-step-bar');
+      const wizNav = document.getElementById('wizard-nav-footer');
+      if (wizBar) wizBar.style.display = (uiMode === 'advanced') ? 'block' : 'none';
+      if (wizNav) wizNav.style.display = (uiMode === 'advanced') ? 'flex' : 'none';
+
+      for (let s = 1; s <= 3; s++) {
+        const pill = document.getElementById(`wiz-pill-${s}`);
+        if (pill) pill.classList.toggle('active', uiMode === 'advanced' && wizardStep === s);
+      }
+      const prevBtn = document.getElementById('wiz-btn-prev');
+      const nextBtn = document.getElementById('wiz-btn-next');
+      if (prevBtn) prevBtn.disabled = (wizardStep <= 1);
+      if (nextBtn) nextBtn.style.display = (wizardStep >= 3) ? 'none' : 'inline-block';
+
+      const showCard = (id, vis) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = vis ? 'block' : 'none';
+      };
+
+      if (uiMode === 'easy') {
+        showCard('card-model-info', true);
+        showCard('card-print-scale', true);
+        showCard('card-filament-dither', true);
+        showCard('card-splitting', true);
+        showCard('card-tex-res', false);
+        showCard('card-volume-mode', false);
+        showCard('card-decimation', false);
+        showCard('card-bed-export', false);
+      } else {
+        showCard('card-model-info', wizardStep === 1);
+        showCard('card-print-scale', wizardStep === 1);
+        showCard('card-volume-mode', wizardStep === 1);
+        showCard('card-decimation', wizardStep === 1);
+        showCard('card-tex-res', wizardStep === 1);
+        showCard('card-bed-export', wizardStep === 1);
+        showCard('card-filament-dither', wizardStep === 2);
+        showCard('card-splitting', wizardStep === 3);
+      }
+    }
+
+    function refreshPresetDropdown() {
+      const sel = document.getElementById('preset-select');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">-- Select Preset --</option>';
+      const addGroup = (label, dict) => {
+        const keys = Object.keys(dict);
+        if (keys.length === 0) return;
+        const grp = document.createElement('optgroup');
+        grp.label = label;
+        keys.forEach(k => {
+          const opt = document.createElement('option');
+          opt.value = k;
+          opt.textContent = k;
+          if (k === activePresetName) opt.selected = true;
+          grp.appendChild(opt);
+        });
+        sel.appendChild(grp);
+      };
+      addGroup('Custom Presets', savedPresets);
+      addGroup('Built-In Presets', BUILTIN_PRESETS);
+      const delBtn = document.getElementById('btn-del-preset');
+      if (delBtn) delBtn.disabled = !(activePresetName && savedPresets[activePresetName]);
+    }
+
+    function _syncPillActive(containerId, matcherFn) {
+      const wrap = document.getElementById(containerId);
+      if (!wrap) return;
+      for (let el of wrap.children) {
+        el.classList.toggle('active', !!matcherFn(el));
+      }
+    }
+
+    function applyPresetObject(p) {
+      if (!p) return;
+      if (typeof p.texture_res === 'number') {
+        currentTexRes = p.texture_res;
+        _syncPillActive('tex-res-pills', el => (el.getAttribute('onclick') || '').includes(`(${p.texture_res},`));
+      }
+      if (typeof p.solidify_mm === 'number') {
+        setSolidify(p.solidify_mm);
+        _syncPillActive('solidify-pills', el => (el.getAttribute('onclick') || '').includes(`(${p.solidify_mm},`) || (p.solidify_mm === 0 && (el.getAttribute('onclick') || '').includes('(0.0,')));
+      }
+      if (typeof p.decimate_enabled === 'boolean' && typeof p.target_triangles === 'number') {
+        setDecimatePreset(p.decimate_enabled ? p.target_triangles : 0);
+      }
+      if (typeof p.ground_z === 'boolean') {
+        const gz = document.getElementById('chk-ground-z'); if (gz) gz.checked = p.ground_z;
+      }
+      if (typeof p.cap_holes === 'boolean') {
+        const ch = document.getElementById('chk-cap-holes'); if (ch) ch.checked = p.cap_holes;
+      }
+      if (typeof p.add_pegs === 'boolean') {
+        const ap = document.getElementById('chk-add-pegs'); if (ap) ap.checked = p.add_pegs;
+      }
+      if (typeof p.export_mm === 'boolean') {
+        const em = document.getElementById('chk-export-mm'); if (em) em.checked = p.export_mm;
+      }
+      if (Array.isArray(p.palette) && p.palette.length >= 4) {
+        for (let k = 0; k < 4; k++) {
+          filamentPaletteHex[k] = p.palette[k];
+          const inp = document.getElementById(`pal-color-${k}`);
+          if (inp) inp.value = p.palette[k];
+        }
+      }
+      if (typeof p.dither_strength === 'number') {
+        ditherStrength = p.dither_strength;
+        const sl = document.getElementById('dither-strength-slider');
+        const lbl = document.getElementById('dither-strength-lbl');
+        if (sl) sl.value = Math.round(ditherStrength * 100);
+        if (lbl) lbl.innerText = `${Math.round(ditherStrength * 100)}%`;
+      }
+      if (typeof p.dither_dot_mm === 'number') {
+        ditherDotMm = p.dither_dot_mm;
+        _syncPillActive('dither-dot-pills', el => (el.getAttribute('onclick') || '').includes(`(${p.dither_dot_mm},`));
+      }
+      if (p.dither_mode) {
+        const btnId = p.dither_mode === 'nearest' ? 'btn-dither-nearest' : (p.dither_mode === 'dither' ? 'btn-dither-dither' : 'btn-dither-none');
+        setDitherMode(p.dither_mode, document.getElementById(btnId));
+      }
+    }
+
+    function onPresetSelected(name) {
+      activePresetName = name || '';
+      const p = savedPresets[name] || BUILTIN_PRESETS[name];
+      if (p) applyPresetObject(p);
+      const delBtn = document.getElementById('btn-del-preset');
+      if (delBtn) delBtn.disabled = !(activePresetName && savedPresets[activePresetName]);
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active_preset: activePresetName })
+      }).catch(() => {});
+    }
+
+    function saveCurrentAsPreset() {
+      const defName = (activePresetName && savedPresets[activePresetName]) ? activePresetName : 'My U1 Preset';
+      const name = prompt('Enter a name for this preset:', defName);
+      if (!name || !name.trim()) return;
+      const cleanName = name.trim();
+      const preset = {
+        texture_res: currentTexRes,
+        solidify_mm: currentSolidifyMm,
+        decimate_enabled: isDecimateEnabled,
+        target_triangles: currentDecimateCount,
+        ground_z: document.getElementById('chk-ground-z') ? document.getElementById('chk-ground-z').checked : true,
+        cap_holes: document.getElementById('chk-cap-holes') ? document.getElementById('chk-cap-holes').checked : true,
+        add_pegs: document.getElementById('chk-add-pegs') ? document.getElementById('chk-add-pegs').checked : true,
+        export_mm: document.getElementById('chk-export-mm') ? document.getElementById('chk-export-mm').checked : true,
+        dither_mode: ditherMode,
+        palette: filamentPaletteHex.slice(0, 4),
+        dither_strength: ditherStrength,
+        dither_dot_mm: ditherDotMm
+      };
+      savedPresets[cleanName] = preset;
+      activePresetName = cleanName;
+      refreshPresetDropdown();
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ presets: savedPresets, active_preset: activePresetName })
+      }).catch(() => {});
+    }
+
+    function deleteSelectedPreset() {
+      if (!activePresetName || !savedPresets[activePresetName]) return;
+      if (!confirm(`Delete custom preset "${activePresetName}"?`)) return;
+      delete savedPresets[activePresetName];
+      activePresetName = '';
+      refreshPresetDropdown();
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ presets: savedPresets, active_preset: '' })
+      }).catch(() => {});
     }
 
     function fetchBedConfig() {
@@ -1043,6 +1295,12 @@
             y: parseFloat(cfg.bed_y_mm) || 250.0,
             z: parseFloat(cfg.bed_z_mm) || 250.0
           };
+          savedPresets = (cfg.presets && typeof cfg.presets === 'object') ? cfg.presets : {};
+          activePresetName = cfg.active_preset || '';
+          refreshPresetDropdown();
+          if (activePresetName && (savedPresets[activePresetName] || BUILTIN_PRESETS[activePresetName])) {
+            applyPresetObject(savedPresets[activePresetName] || BUILTIN_PRESETS[activePresetName]);
+          }
           updateBedConfigLabels();
         })
         .catch(() => {});
