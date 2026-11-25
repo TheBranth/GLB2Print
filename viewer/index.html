@@ -548,6 +548,53 @@
           </div>
         </div>
 
+        <!-- 3B. 4-COLOR FILAMENT PALETTE & 3D DITHERING -->
+        <div class="card" id="card-filament-dither">
+          <div class="card-title">
+            <span>🎨 4-Color Filament Dithering</span>
+            <button class="btn-file" style="padding: 2px 7px; font-size: 0.67rem;" onclick="autoExtractFourFilaments()" title="Analyze model colors via K-Means and prefill the 4 filament swatches">🪄 Auto-Pick 4</button>
+          </div>
+          <div style="font-size: 0.71rem; color: #94a3b8; margin-bottom: 7px; line-height: 1.35;">
+            Maps &amp; dithers colors strictly onto your 4 loaded spools so every exported OBJ imports cleanly into Orca/Snorca.
+          </div>
+          <div class="pill-group" id="dither-mode-pills" style="margin-bottom: 8px;">
+            <div class="pill-btn active" id="btn-dither-none" onclick="setDitherMode('none', this)">Off (Original)</div>
+            <div class="pill-btn" id="btn-dither-nearest" onclick="setDitherMode('nearest', this)">Nearest 4</div>
+            <div class="pill-btn" id="btn-dither-dither" onclick="setDitherMode('dither', this)">✨ Dither 4</div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px;">
+            <label style="display:flex; flex-direction:column; align-items:center; gap:3px; font-size:0.67rem; color:#cbd5e1; cursor:pointer;">
+              <input type="color" id="pal-color-0" value="#1a1a1a" onchange="onFilamentColorChange(0, this.value)" style="width:100%; height:26px; border:1px solid rgba(255,255,255,0.2); border-radius:5px; background:transparent; cursor:pointer;">
+              <span>Spool 1</span>
+            </label>
+            <label style="display:flex; flex-direction:column; align-items:center; gap:3px; font-size:0.67rem; color:#cbd5e1; cursor:pointer;">
+              <input type="color" id="pal-color-1" value="#8c4a2b" onchange="onFilamentColorChange(1, this.value)" style="width:100%; height:26px; border:1px solid rgba(255,255,255,0.2); border-radius:5px; background:transparent; cursor:pointer;">
+              <span>Spool 2</span>
+            </label>
+            <label style="display:flex; flex-direction:column; align-items:center; gap:3px; font-size:0.67rem; color:#cbd5e1; cursor:pointer;">
+              <input type="color" id="pal-color-2" value="#c8a47e" onchange="onFilamentColorChange(2, this.value)" style="width:100%; height:26px; border:1px solid rgba(255,255,255,0.2); border-radius:5px; background:transparent; cursor:pointer;">
+              <span>Spool 3</span>
+            </label>
+            <label style="display:flex; flex-direction:column; align-items:center; gap:3px; font-size:0.67rem; color:#cbd5e1; cursor:pointer;">
+              <input type="color" id="pal-color-3" value="#ece6dc" onchange="onFilamentColorChange(3, this.value)" style="width:100%; height:26px; border:1px solid rgba(255,255,255,0.2); border-radius:5px; background:transparent; cursor:pointer;">
+              <span>Spool 4</span>
+            </label>
+          </div>
+          <div id="dither-params-box" style="display: none; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);">
+            <div class="slider-header">
+              <span class="model-label">Color Mix Strength:</span>
+              <span class="slider-val" id="dither-strength-lbl">80%</span>
+            </div>
+            <input type="range" id="dither-strength-slider" min="0" max="100" step="5" value="80" oninput="onDitherStrengthSlider(this.value)">
+            <div style="font-size: 0.7rem; color: #cbd5e1; font-weight: 600; margin: 6px 0 4px;">Dither Dot Size (0.4mm Nozzle):</div>
+            <div class="pill-group" id="dither-dot-pills">
+              <div class="pill-btn" onclick="setDitherDotMm(0.8, this)">0.8mm Fine</div>
+              <div class="pill-btn active" onclick="setDitherDotMm(1.2, this)">1.2mm Balanced</div>
+              <div class="pill-btn" onclick="setDitherDotMm(2.0, this)">2.0mm Coarse</div>
+            </div>
+          </div>
+        </div>
+
         <!-- 3. PRINT VOLUME / SHELL WALL MODE -->
         <div class="card">
           <div class="card-title">
@@ -884,7 +931,15 @@
     let faceCenters = null;
     let faceNormals = null;
     let originalVertexColors = null;
+    let originalSrgbColors = null;
+    let originalMaterialMap = null;
     let selectedFaceIndices = new Set();
+
+    // 4-Color Filament Dithering State
+    let ditherMode = 'none'; // 'none', 'nearest', 'dither'
+    let filamentPaletteHex = ['#1a1a1a', '#8c4a2b', '#c8a47e', '#ece6dc'];
+    let ditherStrength = 0.80;
+    let ditherDotMm = 1.2;
 
     // Staged Parts
     const PART_PALETTE = [
@@ -1213,8 +1268,51 @@
         geom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(0.85), 3));
       }
       originalVertexColors = geom.attributes.color.clone();
+      originalMaterialMap = mesh.material.map || null;
+      originalSrgbColors = _sampleMeshSrgbColors(mesh, pos.count);
       mesh.material.vertexColors = true;
       mesh.material.needsUpdate = true;
+    }
+
+    function _sampleMeshSrgbColors(mesh, vertCount) {
+      const out = new Float32Array(vertCount * 3);
+      const geom = mesh.geometry;
+      const tex = mesh.material && mesh.material.map;
+      const uv = geom.attributes.uv;
+      if (tex && tex.image && uv && tex.image.width > 0 && tex.image.height > 0) {
+        try {
+          const maxSide = 512;
+          const iw = tex.image.width, ih = tex.image.height;
+          const sc = Math.min(1.0, maxSide / Math.max(iw, ih));
+          const cw = Math.max(16, Math.round(iw * sc)), ch = Math.max(16, Math.round(ih * sc));
+          const canvas = document.createElement('canvas');
+          canvas.width = cw; canvas.height = ch;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(tex.image, 0, 0, cw, ch);
+          const pix = ctx.getImageData(0, 0, cw, ch).data;
+          const flipY = (tex.flipY !== false);
+          for (let i = 0; i < vertCount; i++) {
+            let u = uv.getX(i) % 1.0; if (u < 0) u += 1.0;
+            let v = uv.getY(i) % 1.0; if (v < 0) v += 1.0;
+            const px = Math.min(cw - 1, Math.max(0, Math.floor(u * (cw - 1))));
+            const py = Math.min(ch - 1, Math.max(0, Math.floor((flipY ? (1.0 - v) : v) * (ch - 1))));
+            const idx = (py * cw + px) * 4;
+            out[i * 3] = pix[idx] / 255.0;
+            out[i * 3 + 1] = pix[idx + 1] / 255.0;
+            out[i * 3 + 2] = pix[idx + 2] / 255.0;
+          }
+          return out;
+        } catch (e) {
+          console.warn('Texture sampling fallback:', e);
+        }
+      }
+      const col = geom.attributes.color;
+      for (let i = 0; i < vertCount; i++) {
+        out[i * 3] = col.getX(i);
+        out[i * 3 + 1] = col.getY(i);
+        out[i * 3 + 2] = col.getZ(i);
+      }
+      return out;
     }
 
     // --- EVENT LISTENERS (DRAG & DROP, LASSO, SHORTCUTS) ---
@@ -1620,7 +1718,19 @@
       const colAttr = geom.attributes.color;
       const index = geom.index;
 
-      colAttr.copy(originalVertexColors);
+      if (ditherMode !== 'none' && originalSrgbColors) {
+        if (primaryMesh.material.map !== null) {
+          primaryMesh.material.map = null;
+          primaryMesh.material.needsUpdate = true;
+        }
+        _applyDitherToColorAttr(geom, colAttr);
+      } else {
+        if (primaryMesh.material.map !== originalMaterialMap) {
+          primaryMesh.material.map = originalMaterialMap;
+          primaryMesh.material.needsUpdate = true;
+        }
+        colAttr.copy(originalVertexColors);
+      }
       const faceTints = new Map();
 
       // 1. Tints for staged parts
@@ -2388,6 +2498,192 @@
       return ranges;
     }
 
+    // --- 4-COLOR FILAMENT PALETTE & 3D DITHERING ---
+    function _hexToSrgb01(hex) {
+      const h = (hex || '#000000').replace('#', '');
+      return [
+        parseInt(h.slice(0, 2), 16) / 255.0,
+        parseInt(h.slice(2, 4), 16) / 255.0,
+        parseInt(h.slice(4, 6), 16) / 255.0
+      ];
+    }
+
+    function _srgb01ToHex(r, g, b) {
+      const toHex = v => Math.min(255, Math.max(0, Math.round(v * 255))).toString(16).padStart(2, '0');
+      return '#' + toHex(r) + toHex(g) + toHex(b);
+    }
+
+    function _srgbToOklab3(r, g, b) {
+      const lr = r <= 0.04045 ? r / 12.92 : Math.pow((r + 0.055) / 1.055, 2.4);
+      const lg = g <= 0.04045 ? g / 12.92 : Math.pow((g + 0.055) / 1.055, 2.4);
+      const lb = b <= 0.04045 ? b / 12.92 : Math.pow((b + 0.055) / 1.055, 2.4);
+      const l = Math.cbrt(Math.max(0, 0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb));
+      const m = Math.cbrt(Math.max(0, 0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb));
+      const s = Math.cbrt(Math.max(0, 0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb));
+      return [
+        0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+      ];
+    }
+
+    const _BAYER_4X4 = [
+      [0, 8, 2, 10],
+      [12, 4, 14, 6],
+      [3, 11, 1, 9],
+      [15, 7, 13, 5]
+    ];
+    const _Z_SX = [0, 2, 1, 3];
+    const _Z_SY = [0, 2, 3, 1];
+
+    function _applyDitherToColorAttr(geom, colAttr) {
+      const pos = geom.attributes.position;
+      const vertCount = pos.count;
+      const palRgb = filamentPaletteHex.map(_hexToSrgb01);
+      const palLab = palRgb.map(c => _srgbToOklab3(c[0], c[1], c[2]));
+
+      let scaleToMm = 1.0;
+      if (boundingBox) {
+        const size = new THREE.Vector3();
+        boundingBox.getSize(size);
+        const nativeToMm = (Math.max(size.x, size.y, size.z) < 10.0) ? 1000.0 : 1.0;
+        scaleToMm = nativeToMm * currentScaleRatio;
+      }
+      const pitch = Math.max(ditherDotMm, 0.25);
+      const isDither = (ditherMode === 'dither' && ditherStrength > 0.01);
+
+      for (let i = 0; i < vertCount; i++) {
+        const r = originalSrgbColors[i * 3];
+        const g = originalSrgbColors[i * 3 + 1];
+        const b = originalSrgbColors[i * 3 + 2];
+        const [L, a, bb] = _srgbToOklab3(r, g, b);
+
+        let i0 = 0, i1 = 1, d0 = Infinity, d1 = Infinity;
+        for (let k = 0; k < palLab.length; k++) {
+          const dL = L - palLab[k][0], da = a - palLab[k][1], db = bb - palLab[k][2];
+          const dist = dL * dL + da * da + db * db;
+          if (dist < d0) {
+            d1 = d0; i1 = i0;
+            d0 = dist; i0 = k;
+          } else if (dist < d1) {
+            d1 = dist; i1 = k;
+          }
+        }
+
+        let chosen = i0;
+        if (isDither) {
+          const c0 = palLab[i0], c1 = palLab[i1];
+          const sL = c1[0] - c0[0], sa = c1[1] - c0[1], sb = c1[2] - c0[2];
+          const denom = sL * sL + sa * sa + sb * sb + 1e-8;
+          let t = ((L - c0[0]) * sL + (a - c0[1]) * sa + (bb - c0[2]) * sb) / denom;
+          if (t < 0.06) t = 0.0;
+          else if (t > 0.5) t = 0.5;
+
+          const ix = Math.floor((pos.getX(i) * scaleToMm) / pitch) & 3;
+          const iy = Math.floor((pos.getY(i) * scaleToMm) / pitch) & 3;
+          const iz = Math.floor((pos.getZ(i) * scaleToMm) / pitch) & 3;
+          const thresh = (_BAYER_4X4[(iy + _Z_SY[iz]) & 3][(ix + _Z_SX[iz]) & 3] + 0.5) / 16.0;
+          if (t * ditherStrength > thresh) chosen = i1;
+        }
+        colAttr.setXYZ(i, palRgb[chosen][0], palRgb[chosen][1], palRgb[chosen][2]);
+      }
+    }
+
+    function setDitherMode(mode, el) {
+      ditherMode = mode;
+      const pills = document.getElementById('dither-mode-pills');
+      if (pills) { for (let p of pills.children) p.classList.remove('active'); }
+      if (el) el.classList.add('active');
+      const box = document.getElementById('dither-params-box');
+      if (box) box.style.display = (mode === 'dither') ? 'block' : 'none';
+      schedulePartTintsRender();
+    }
+
+    function onFilamentColorChange(idx, hex) {
+      filamentPaletteHex[idx] = hex;
+      if (ditherMode === 'none') {
+        setDitherMode('dither', document.getElementById('btn-dither-dither'));
+      } else {
+        schedulePartTintsRender();
+      }
+    }
+
+    function onDitherStrengthSlider(val) {
+      const pct = parseFloat(val);
+      ditherStrength = pct / 100.0;
+      const lbl = document.getElementById('dither-strength-lbl');
+      if (lbl) lbl.innerText = `${pct.toFixed(0)}%`;
+      schedulePartTintsRender();
+    }
+
+    function setDitherDotMm(val, el) {
+      ditherDotMm = parseFloat(val) || 1.2;
+      const pills = document.getElementById('dither-dot-pills');
+      if (pills) { for (let p of pills.children) p.classList.remove('active'); }
+      if (el) el.classList.add('active');
+      schedulePartTintsRender();
+    }
+
+    function autoExtractFourFilaments() {
+      if (!originalSrgbColors || originalSrgbColors.length === 0) {
+        alert("Please load a 3D model first!");
+        return;
+      }
+      const totalV = originalSrgbColors.length / 3;
+      const step = Math.max(1, Math.floor(totalV / 4000));
+      const pts = [];
+      for (let i = 0; i < totalV; i += step) {
+        pts.push([originalSrgbColors[i * 3], originalSrgbColors[i * 3 + 1], originalSrgbColors[i * 3 + 2]]);
+      }
+      if (pts.length < 4) return;
+      // Deterministic K-Means++ (k = 4)
+      const centers = [pts[0].slice()];
+      for (let k = 1; k < 4; k++) {
+        let bestIdx = 0, bestD = -1;
+        for (let i = 0; i < pts.length; i++) {
+          let md = Infinity;
+          for (let c of centers) {
+            const d = (pts[i][0]-c[0])**2 + (pts[i][1]-c[1])**2 + (pts[i][2]-c[2])**2;
+            if (d < md) md = d;
+          }
+          if (md > bestD) { bestD = md; bestIdx = i; }
+        }
+        centers.push(pts[bestIdx].slice());
+      }
+      for (let it = 0; it < 16; it++) {
+        const sums = [[0,0,0],[0,0,0],[0,0,0],[0,0,0]], cnts = [0,0,0,0];
+        for (let i = 0; i < pts.length; i++) {
+          let bk = 0, bd = Infinity;
+          for (let k = 0; k < 4; k++) {
+            const d = (pts[i][0]-centers[k][0])**2 + (pts[i][1]-centers[k][1])**2 + (pts[i][2]-centers[k][2])**2;
+            if (d < bd) { bd = d; bk = k; }
+          }
+          sums[bk][0] += pts[i][0]; sums[bk][1] += pts[i][1]; sums[bk][2] += pts[i][2];
+          cnts[bk]++;
+        }
+        for (let k = 0; k < 4; k++) {
+          if (cnts[k] > 0) {
+            centers[k][0] = sums[k][0] / cnts[k];
+            centers[k][1] = sums[k][1] / cnts[k];
+            centers[k][2] = sums[k][2] / cnts[k];
+          }
+        }
+      }
+      // Sort dark -> light for intuitive spool order
+      centers.sort((a, b) => (a[0]+a[1]+a[2]) - (b[0]+b[1]+b[2]));
+      for (let k = 0; k < 4; k++) {
+        const hex = _srgb01ToHex(centers[k][0], centers[k][1], centers[k][2]);
+        filamentPaletteHex[k] = hex;
+        const inp = document.getElementById(`pal-color-${k}`);
+        if (inp) inp.value = hex;
+      }
+      if (ditherMode === 'none') {
+        setDitherMode('dither', document.getElementById('btn-dither-dither'));
+      } else {
+        schedulePartTintsRender();
+      }
+    }
+
     // --- EXECUTE CONVERSION / EXPORT ---
     function executeExport() {
       const btn = document.getElementById('btn-export-all');
@@ -2422,7 +2718,11 @@
         ground_z: groundZ,
         format: fmt,
         cap_cut: capHoles,
-        split_mode: currentSplitMode
+        split_mode: currentSplitMode,
+        dither_mode: ditherMode,
+        palette_colors: filamentPaletteHex.map(_hexToSrgb01),
+        dither_strength: ditherStrength,
+        dither_dot_mm: ditherDotMm
       };
 
       const addPegs = (currentSolidifyMm < 0) && (document.getElementById('chk-add-pegs') ? document.getElementById('chk-add-pegs').checked : false);

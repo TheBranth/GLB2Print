@@ -33,6 +33,10 @@ class ConversionJob:
                  peg_height: float = 5.0,
                  solidify_mm: float = 0.0,
                  parts_json: Optional[str] = None,
+                 dither_mode: str = "none",
+                 palette_colors: Optional[str] = None,
+                 dither_strength: float = 0.8,
+                 dither_dot_mm: float = 1.2,
                  log_callback: Optional[Callable[[str], None]] = None,
                  progress_callback: Optional[Callable[[float, str], None]] = None):
         self.input_glb = os.path.abspath(input_glb)
@@ -54,6 +58,10 @@ class ConversionJob:
         self.peg_height = peg_height
         self.solidify_mm = solidify_mm
         self.parts_json = os.path.abspath(parts_json) if parts_json else ""
+        self.dither_mode = dither_mode
+        self.palette_colors = palette_colors or ""
+        self.dither_strength = dither_strength
+        self.dither_dot_mm = dither_dot_mm
         self.log_callback = log_callback or (lambda msg: None)
         self.progress_callback = progress_callback or (lambda pct, msg: None)
 
@@ -118,6 +126,14 @@ class ConversionJob:
 
         if self.parts_json:
             cmd.extend([f"--parts-json={self.parts_json}"])
+
+        if self.dither_mode != "none" and self.palette_colors:
+            cmd.extend([
+                f"--dither-mode={self.dither_mode}",
+                f"--palette-colors={self.palette_colors}",
+                f"--dither-strength={self.dither_strength}",
+                f"--dither-dot-mm={self.dither_dot_mm}",
+            ])
 
         if self.output_obj:
             cmd.extend([f"--output-obj={self.output_obj}"])

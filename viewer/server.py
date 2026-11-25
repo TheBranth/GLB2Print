@@ -383,6 +383,17 @@ class UnifiedAppServer:
                         if solidify_mm >= 0.0:
                             add_pegs = False
 
+                        dither_mode = str(data.get("dither_mode", "none"))
+                        raw_palette = data.get("palette_colors", None)
+                        palette_str = ""
+                        if isinstance(raw_palette, list) and len(raw_palette) > 0:
+                            palette_str = ";".join(
+                                ",".join(str(float(c)) for c in rgb[:3])
+                                for rgb in raw_palette if isinstance(rgb, list) and len(rgb) >= 3
+                            )
+                        dither_strength = float(data.get("dither_strength", 0.8))
+                        dither_dot_mm = float(data.get("dither_dot_mm", 1.2))
+
                         if parts_data:
                             with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tf:
                                 if parts_planes:
@@ -409,7 +420,11 @@ class UnifiedAppServer:
                             peg_radius=peg_radius,
                             peg_height=peg_height,
                             solidify_mm=solidify_mm,
-                            parts_json=temp_json
+                            parts_json=temp_json,
+                            dither_mode=dither_mode,
+                            palette_colors=palette_str,
+                            dither_strength=dither_strength,
+                            dither_dot_mm=dither_dot_mm
                         )
 
                         ok = job.run()

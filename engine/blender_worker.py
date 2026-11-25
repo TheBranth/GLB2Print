@@ -49,7 +49,110 @@ def parse_args():
     # Multi-Part Lasso / Region Extraction
     parser.add_argument("--parts-json", default="", help="Path to JSON file containing part names and face indices")
 
+    # 4-Color Filament Palette & 3D Dithering
+    parser.add_argument("--dither-mode", choices=["none", "nearest", "dither"], default="none", help="Quantize/dither vertex colors to filament palette")
+    parser.add_argument("--palette-colors", default="", help="Semicolon-separated sRGB colors 'r,g,b;r,g,b;...' in [0..1]")
+    parser.add_argument("--dither-strength", type=float, default=0.8, help="Dithering mix strength 0.0 - 1.0")
+    parser.add_argument("--dither-dot-mm", type=float, default=1.2, help="3D dither dot pitch in mm")
+
     return parser.parse_args(app_args)
+
+def _srgb_to_oklab(srgb):
+    """Vectorized sRGB [0..1] (N, 3) -> perceptual OkLab (N, 3)."""
+    c = np.clip(srgb, 0.0, 1.0).astype(np.float32)
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    l = 0.4122214708 * lin[:, 0] + 0.5363325363 * lin[:, 1] + 0.0514459929 * lin[:, 2]
+    m = 0.2119034982 * lin[:, 0] + 0.6806995451 * lin[:, 1] + 0.1073969566 * lin[:, 2]
+    s = 0.0883024619 * lin[:, 0] + 0.2817188376 * lin[:, 1] + 0.6299787005 * lin[:, 2]
+    l_ = np.cbrt(np.maximum(l, 0.0))
+    m_ = np.cbrt(np.maximum(m, 0.0))
+    s_ = np.cbrt(np.maximum(s, 0.0))
+    L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+    a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+    b = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    return np.column_stack((L, a, b))
+
+
+def apply_filament_dithering(target_obj, palette_srgb, mode, strength=0.8, dot_mm=1.2, label="mesh"):
+    """
+    Snaps or 3D-ordered-dithers vertex colors strictly to `palette_srgb` (K x 3 in [0..1])
+    per vertex so exported OBJs contain ONLY the exact filament colors.
+    """
+    if mode == "none" or palette_srgb is None or len(palette_srgb) < 2:
+        return
+    mesh = target_obj.data
+    num_verts = len(mesh.vertices)
+    num_loops = len(mesh.loops)
+    if num_verts == 0 or num_loops == 0:
+        return
+
+    color_layer = mesh.color_attributes.get('Color') or mesh.color_attributes.active_color
+    if not color_layer or getattr(color_layer, 'data_type', None) not in ('BYTE_COLOR', 'FLOAT_COLOR'):
+        return
+
+    t0 = time.time()
+    raw_c = np.empty(num_loops * 4, dtype=np.float32)
+    color_prop = 'color_srgb' if (len(color_layer.data) > 0 and hasattr(color_layer.data[0], 'color_srgb')) else 'color'
+    color_layer.data.foreach_get(color_prop, raw_c)
+    loop_rgba = raw_c.reshape((num_loops, 4))
+
+    loop_vidx = np.empty(num_loops, dtype=np.int32)
+    mesh.loops.foreach_get('vertex_index', loop_vidx)
+
+    # Average corner sRGB per vertex so OBJ export never averages mixed corners back into grey
+    v_sum = np.zeros((num_verts, 3), dtype=np.float32)
+    v_cnt = np.zeros(num_verts, dtype=np.float32)
+    np.add.at(v_sum, loop_vidx, loop_rgba[:, :3])
+    np.add.at(v_cnt, loop_vidx, 1.0)
+    v_srgb = v_sum / np.maximum(v_cnt[:, None], 1.0)
+
+    v_lab = _srgb_to_oklab(v_srgb)
+    pal_lab = _srgb_to_oklab(palette_srgb)
+
+    diff = v_lab[:, None, :] - pal_lab[None, :, :]
+    d2 = np.sum(diff * diff, axis=2)  # (N_verts, K)
+    order = np.argsort(d2, axis=1)
+    idx0 = order[:, 0]
+    idx1 = order[:, 1]
+
+    if mode == "dither" and strength > 0.01:
+        c0 = pal_lab[idx0]
+        c1 = pal_lab[idx1]
+        seg = c1 - c0
+        denom = np.sum(seg * seg, axis=1) + 1e-8
+        t = np.clip(np.sum((v_lab - c0) * seg, axis=1) / denom, 0.0, 0.5)
+        t[t < 0.06] = 0.0
+
+        verts_co = np.empty(num_verts * 3, dtype=np.float32)
+        mesh.vertices.foreach_get('co', verts_co)
+        co = verts_co.reshape((num_verts, 3))
+        scale_to_mm = 1000.0 if max(target_obj.dimensions) < 10.0 else 1.0
+        pitch = max(float(dot_mm), 0.25)
+        ix = (np.floor((co[:, 0] * scale_to_mm) / pitch).astype(np.int32)) & 3
+        iy = (np.floor((co[:, 1] * scale_to_mm) / pitch).astype(np.int32)) & 3
+        iz = (np.floor((co[:, 2] * scale_to_mm) / pitch).astype(np.int32)) & 3
+
+        bayer2d = np.array([
+            [0, 8, 2, 10],
+            [12, 4, 14, 6],
+            [3, 11, 1, 9],
+            [15, 7, 13, 5]
+        ], dtype=np.float32)
+        z_sx = np.array([0, 2, 1, 3], dtype=np.int32)[iz]
+        z_sy = np.array([0, 2, 3, 1], dtype=np.int32)[iz]
+        thresh = (bayer2d[(iy + z_sy) & 3, (ix + z_sx) & 3] + 0.5) / 16.0
+
+        use_second = (t * float(strength)) > thresh
+        chosen = np.where(use_second, idx1, idx0)
+    else:
+        chosen = idx0
+
+    v_out = palette_srgb[chosen]
+    out_rgba = np.ones((num_loops, 4), dtype=np.float32)
+    out_rgba[:, :3] = v_out[loop_vidx]
+    color_layer.data.foreach_set(color_prop, out_rgba.flatten())
+    log(f"Filament {mode} ({len(palette_srgb)} colors, dot={dot_mm:.1f}mm) on '{label}' completed in {time.time()-t0:.2f}s")
+
 
 def export_3mf(filepath, mesh, loop_colors):
     """Exports mesh and colors to a standard 3MF file with color groups."""
@@ -1025,6 +1128,21 @@ def main():
             apply_inward_solidify(target_obj, args.solidify_mm, label)
         return did_decimate
 
+    # Parse filament palette if dithering/quantization requested
+    palette_srgb = None
+    if args.dither_mode != "none" and args.palette_colors:
+        try:
+            pal_list = []
+            for item in args.palette_colors.split(";"):
+                vals = [float(x.strip()) for x in item.split(",") if x.strip()]
+                if len(vals) >= 3:
+                    pal_list.append(vals[:3])
+            if len(pal_list) >= 2:
+                palette_srgb = np.clip(np.array(pal_list, dtype=np.float32), 0.0, 1.0)
+                log(f"Loaded {len(palette_srgb)}-color filament palette for '{args.dither_mode}' mapping.")
+        except Exception as pe:
+            log(f"WARNING: Failed to parse --palette-colors ({pe}); skipping dithering.")
+
     # 6. Check if Multi-Part Lasso / Region Split is requested
     if args.parts_json and os.path.isfile(args.parts_json):
         log(f"MULTI-PART SPLIT: Processing parts from {args.parts_json}...")
@@ -1188,6 +1306,9 @@ def main():
                 bpy.context.view_layer.objects.active = part_obj
                 bpy.ops.object.modifier_apply(modifier='Decimate')
 
+            if palette_srgb is not None:
+                apply_filament_dithering(part_obj, palette_srgb, args.dither_mode, args.dither_strength, args.dither_dot_mm, safe_name)
+
             if args.ground_z and planes_for_part:
                 lay_flat_on_cut_plane(part_obj, cut_planes_for_layout)
 
@@ -1273,6 +1394,10 @@ def main():
         p1_3mf = split_path(args.output_3mf, "part1")
         p2_3mf = split_path(args.output_3mf, "part2")
 
+        if palette_srgb is not None:
+            apply_filament_dithering(part1, palette_srgb, args.dither_mode, args.dither_strength, args.dither_dot_mm, "Part_1")
+            apply_filament_dithering(part2, palette_srgb, args.dither_mode, args.dither_strength, args.dither_dot_mm, "Part_2")
+
         if args.ground_z:
             lay_flat_on_cut_plane(part1, [(plane_co, plane_no, -1.0)])
             lay_flat_on_cut_plane(part2, [(plane_co, plane_no, 1.0)])
@@ -1299,6 +1424,9 @@ def main():
 
         if args.solidify_mm != 0.0:
             apply_inward_solidify(obj, args.solidify_mm, "base mesh")
+
+        if palette_srgb is not None:
+            apply_filament_dithering(obj, palette_srgb, args.dither_mode, args.dither_strength, args.dither_dot_mm, "base mesh")
 
         export_object(obj, args.output_obj, args.output_3mf, ground_z=args.ground_z)
 
