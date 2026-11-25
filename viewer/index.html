@@ -682,7 +682,8 @@
 
             <div style="font-size: 0.72rem; color: #cbd5e1; font-weight: 600; margin-bottom: 4px;">Target Pieces:</div>
             <div class="pill-group" id="smart-pieces-pills" style="margin-bottom: 8px;">
-              <div class="pill-btn active" onclick="setSmartTargetPieces(0, this)">Auto (Fit Bed)</div>
+              <div class="pill-btn active" onclick="setSmartTargetPieces(-1, this)" title="Optimistically finds all strong natural joints/relief cuts (up to 6 pieces)">Auto (Optimistic)</div>
+              <div class="pill-btn" onclick="setSmartTargetPieces(0, this)" title="Splits only as needed to fit your configured print bed">Fit Bed</div>
               <div class="pill-btn" onclick="setSmartTargetPieces(2, this)">2</div>
               <div class="pill-btn" onclick="setSmartTargetPieces(3, this)">3</div>
               <div class="pill-btn" onclick="setSmartTargetPieces(4, this)">4</div>
@@ -911,7 +912,7 @@
     let bedConfig = { x: 250.0, y: 250.0, z: 250.0 };
 
     // Smart Auto-Split State
-    let smartTargetPieces = 0; // 0 = Auto (Fit Bed)
+    let smartTargetPieces = -1; // -1 = Auto (Optimistic Joints), 0 = Auto (Fit Bed), >0 = Exact count
     let smartPreciseMode = false; // false = Fast (Default), true = Precise (CPU)
     let smartPlaneMeshes = [];
 
@@ -2512,7 +2513,8 @@
 
     // --- SMART AUTO-SPLIT ENGINE (PLANAR JOINTS & RELIEF SEAMS) ---
     function setSmartTargetPieces(val, el) {
-      smartTargetPieces = parseInt(val, 10) || 0;
+      const parsed = parseInt(val, 10);
+      smartTargetPieces = Number.isNaN(parsed) ? -1 : parsed;
       const pills = document.getElementById('smart-pieces-pills');
       if (pills) {
         for (let p of pills.children) p.classList.remove('active');
@@ -2951,8 +2953,9 @@
 
           // Three.js Y-up bed mapping: X -> bedX, Y -> bedZ (height), Z -> bedY (depth)
           const bedThreeMm = [bedConfig.x, bedConfig.z, bedConfig.y];
+          const isOptimistic = (smartTargetPieces < 0);
           const isAutoFit = (smartTargetPieces === 0);
-          const maxPartsLimit = isAutoFit ? 8 : smartTargetPieces;
+          const maxPartsLimit = isAutoFit ? 8 : (isOptimistic ? 6 : smartTargetPieces);
 
           const allIndices = new Array(totalFaces);
           for (let i = 0; i < totalFaces; i++) allIndices[i] = i;
@@ -2970,16 +2973,18 @@
               const r = regions[i];
               if (r.indices.length < 120) continue;
               const over = _smExceedsBed(r.flatDims);
-              if (isAutoFit && !over && regions.length >= 2) continue;
+              if (isAutoFit && !over) continue;
               const prio = (over ? 100.0 : 1.0) * r.indices.length;
               if (prio > bestPriority) { bestPriority = prio; targetIdx = i; }
             }
             if (targetIdx < 0) break;
-            if (isAutoFit && !_smExceedsBed(regions[targetIdx].flatDims) && regions.length >= 2) break;
 
             const reg = regions[targetIdx];
             const best = _smFindBestSplit(ptsMm, nms, reg.indices, reg.planesThreeMm, bedThreeMm, isAutoFit, smartPreciseMode);
             if (!best) break;
+            if (isOptimistic && !_smExceedsBed(reg.flatDims) && regions.length >= 2 && best.score < 1.35) {
+              break;
+            }
 
             const posIdx = [], negIdx = [];
             for (let k = 0; k < reg.indices.length; k++) {
